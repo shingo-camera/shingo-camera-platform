@@ -84,3 +84,12 @@ migrations_dir = "migrations"
 # 環境変数・Secrets は後続 WORK で追加する。
 # 例は .dev.vars.example / README.md を参照。
 # 実際の Secrets はコードにも Git にも保存しない。
+
+# Cron Trigger（WORK-009 Warning Notification）
+#
+# 1 時間ごとに scheduled ハンドラ（src/index.ts）を起動し、Warning を判定・通知する。
+#   設計根拠: operation/WARNING.md 6「初期頻度: 1時間ごと」, WORK-009_WARNING.md
+# 既存の keep_vars / [vars] / [assets] / [observability] / [[d1_databases]] /
+# database_id には影響しない（本セクションの追加のみ）。
+[triggers]
+crons = ["0 * * * *"]

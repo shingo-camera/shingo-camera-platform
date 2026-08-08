@@ -33,6 +33,7 @@ import { handleNoteApply, handleNoteStatus } from "./routes/migrations";
 import { handleNoteImport, handleNoteList, handleNoteUpdate } from "./routes/admin_note";
 import { withErrorHandling } from "./shared/errors";
 import { jsonError } from "./shared/response";
+import { runWarningJob } from "./shared/warning_job";
 
 /**
  * 環境変数・Secrets のバインディング型。
@@ -47,6 +48,8 @@ export interface Env {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_PRICE_SUN_AND_MOON?: string;
+  // Resend（Warning 通知メール用。Cloudflare Secret / Local は .dev.vars。実値を Git/toml に書かない）
+  MAIL_API_KEY?: string;
 }
 
 /**
@@ -216,5 +219,27 @@ function routeAdmin(
 export default {
   fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     return withErrorHandling((req) => route(req, env))(request);
+  },
+  /**
+   * Cloudflare Cron Trigger（1時間ごと）から呼ばれる定期処理。
+   * WORK-009 Warning 判定・登録・管理者通知を実行する。
+   * 例外は握りつぶさずログに残すが、scheduled 全体は安全に終了させる
+   * （1 回の失敗が次回起動を妨げないようにする）。
+   */
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const r = await runWarningJob(env);
+          console.log(
+            `warning_job: detected=${r.detected} inserted=${r.inserted} reused=${r.reused} ` +
+              `notified=${r.notified} mailSuppressed=${r.mailSuppressed} ` +
+              `mailFailed=${r.mailFailed} noRecipient=${r.mailSkippedNoRecipient}`,
+          );
+        } catch (e) {
+          console.error("warning_job failed:", e instanceof Error ? e.message : String(e));
+        }
+      })(),
+    );
   },
 };
