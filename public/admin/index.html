@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1024" />
+<title>管理コンソール | ダッシュボード</title>
+<link rel="stylesheet" href="/admin/assets/admin.css" />
+</head>
+<body>
+<header class="admin-header">
+  <h1>管理コンソール</h1>
+  <nav>
+    <a href="/admin/">ダッシュボード</a>
+    <a href="/admin/users/">ユーザー</a>
+    <a href="/admin/warnings/">Warning</a>
+    <a href="/admin/note/">note移行</a>
+    <a href="/admin/products/">商品</a>
+  </nav>
+</header>
+<main>
+  <h2>ダッシュボード</h2>
+  <div id="stats" class="stat-grid"></div>
+  <h3>直近の Warning</h3>
+  <div id="recent"></div>
+</main>
+
+<script src="/admin/assets/vendor/supabase.js"></script>
+<script src="/admin/assets/admin.js"></script>
+<script>
+(async function () {
+  var A = self.AdminUI;
+  var stats = document.getElementById("stats");
+  var recent = document.getElementById("recent");
+  A.setLoading(stats);
+  try {
+    var d = await A.apiGet("/api/admin/dashboard");
+    if (!d) return;
+    A.clear(stats);
+    function stat(num, lbl) {
+      var box = A.el("div", null, "stat");
+      box.appendChild(A.el("div", num, "num"));
+      box.appendChild(A.el("div", lbl, "lbl"));
+      return box;
+    }
+    stats.appendChild(stat(d.totalUsers, "総ユーザー数"));
+    stats.appendChild(stat(d.todaySignups, "当日新規登録"));
+    stats.appendChild(stat(d.todayPurchases, "当日購入"));
+    stats.appendChild(stat(d.noteUnmigrated, "note未移行"));
+    stats.appendChild(stat(d.openWarnings, "未対応Warning"));
+    (d.activeUsersByProduct || []).forEach(function (p) {
+      stats.appendChild(stat(p.count, p.name));
+    });
+
+    // 直近Warning
+    A.clear(recent);
+    if (!d.recentWarnings || d.recentWarnings.length === 0) {
+      recent.appendChild(A.el("div", "要確認なし", "notice"));
+      return;
+    }
+    var table = A.el("table");
+    var thead = A.el("thead");
+    var htr = A.el("tr");
+    ["対象メール", "種別", "スコア", "検知日時", "状態", ""].forEach(function (h) { htr.appendChild(A.el("th", h)); });
+    thead.appendChild(htr); table.appendChild(thead);
+    var tbody = A.el("tbody");
+    d.recentWarnings.forEach(function (w) {
+      var tr = A.el("tr");
+      tr.appendChild(A.td(w.email));
+      tr.appendChild(A.td(w.warningType));
+      tr.appendChild(A.td(w.warningScore));
+      tr.appendChild(A.td(w.detectDate));
+      tr.appendChild(A.td(A.label(A.maps.WARN_STATUS, w.status)));
+      var link = A.el("a", "対応", "btn-link");
+      link.href = "/admin/warnings/";
+      var cell = A.el("td"); cell.appendChild(link); tr.appendChild(cell);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    recent.appendChild(table);
+  } catch (e) {
+    A.setError(stats, e.message);
+  }
+})();
+</script>
+</body>
+</html>

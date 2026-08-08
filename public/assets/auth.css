@@ -1,0 +1,14 @@
+/* auth.css — 認証画面固有スタイル（common.css を補完）
+ * 現状は最小。共通で足りない差分のみここへ追加する。
+ */
+
+.session-box {
+  margin-top: 18px;
+  padding: 12px;
+  background: #0f1115;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  word-break: break-all;
+}

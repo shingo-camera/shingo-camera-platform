@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>新規登録 | shingo-camera Platform</title>
+  <link rel="stylesheet" href="/assets/common.css" />
+  <link rel="stylesheet" href="/assets/auth.css" />
+</head>
+<body data-page="signup">
+  <div class="wrap">
+    <div class="card">
+      <p class="brand">shingo-camera Platform</p>
+      <h1>新規登録</h1>
+
+      <label for="email">メールアドレス</label>
+      <input id="email" type="email" autocomplete="email" placeholder="you@example.com" />
+
+      <label for="password">パスワード</label>
+      <input id="password" type="password" autocomplete="new-password" />
+      <p class="hint">登録後、確認メールが届きます。メール内リンクで認証を完了してください。</p>
+
+      <button id="submit" type="button">登録する</button>
+
+      <p id="msg" class="msg"></p>
+
+      <div class="links">
+        <a href="/login/">ログインへ戻る</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/vendor/supabase.js"></script>
+  <script src="/assets/auth.js"></script>
+</body>
+</html>

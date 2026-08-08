@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>パスワード再設定 | shingo-camera Platform</title>
+  <link rel="stylesheet" href="/assets/common.css" />
+  <link rel="stylesheet" href="/assets/auth.css" />
+</head>
+<body data-page="forgot">
+  <div class="wrap">
+    <div class="card">
+      <p class="brand">shingo-camera Platform</p>
+      <h1>パスワード再設定</h1>
+
+      <label for="email">メールアドレス</label>
+      <input id="email" type="email" autocomplete="email" placeholder="you@example.com" />
+      <p class="hint">登録済みのメールアドレスへ、再設定用のリンクを送信します。</p>
+
+      <button id="submit" type="button">再設定メールを送信</button>
+
+      <p id="msg" class="msg"></p>
+
+      <div class="links">
+        <a href="/login/">ログインへ戻る</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/vendor/supabase.js"></script>
+  <script src="/assets/auth.js"></script>
+</body>
+</html>

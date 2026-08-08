@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1024" />
+<title>管理コンソール | note移行</title>
+<link rel="stylesheet" href="/admin/assets/admin.css" />
+<style>
+  .import-box { margin: 16px 0; padding: 16px; border: 1px solid #ddd; border-radius: 6px; }
+  .import-box input[type=file] { margin: 8px 0; }
+  .result-summary { margin-top: 12px; }
+  .result-summary span { display: inline-block; margin-right: 16px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; text-align: left; }
+  .err-rows { margin-top: 8px; color: #a12; font-size: 13px; }
+  .filters { margin: 12px 0; }
+  .filters input, .filters select { padding: 6px; margin-right: 8px; }
+  .row-actions button { font-size: 12px; margin-right: 4px; }
+  .pager { margin-top: 12px; display: flex; align-items: center; gap: 12px; }
+  .pager button:disabled { opacity: 0.4; cursor: default; }
+  .pager .page-info { font-size: 13px; }
+</style>
+</head>
+<body>
+<header class="admin-header">
+  <h1>管理コンソール</h1>
+  <nav>
+    <a href="/admin/">ダッシュボード</a>
+    <a href="/admin/users/">ユーザー</a>
+    <a href="/admin/warnings/">Warning</a>
+    <a href="/admin/note/">note移行</a>
+    <a href="/admin/products/">商品</a>
+  </nav>
+</header>
+<main>
+  <h2>note移行</h2>
+
+  <div class="import-box">
+    <h3>CSV取込</h3>
+    <p>note販売履歴CSV（UTF-8）をアップロードします。同じCSVを再投入しても重複登録されません。</p>
+    <input type="file" id="csvfile" accept=".csv" />
+    <button id="import-btn">取込実行</button>
+    <div id="import-result"></div>
+  </div>
+
+  <h3>note購入一覧</h3>
+  <div class="filters">
+    <input type="text" id="f-txid" placeholder="取引ID" />
+    <input type="text" id="f-noteid" placeholder="購入者名" />
+    <select id="f-status">
+      <option value="">移行状態（すべて）</option>
+      <option value="0">未移行</option>
+      <option value="1">移行済</option>
+      <option value="2">要確認</option>
+      <option value="9">無効</option>
+    </select>
+    <button id="search-btn">検索</button>
+  </div>
+  <div id="list"></div>
+  <div id="pager" class="pager"></div>
+</main>
+
+<script src="/admin/assets/vendor/supabase.js"></script>
+<script src="/admin/assets/admin.js"></script>
+<script>
+(function () {
+  var A = self.AdminUI;
+  var MATCH = { 0: "未移行", 1: "移行済", 2: "要確認", 9: "無効" };
+
+  function elem(tag, text, cls) {
+    var e = document.createElement(tag);
+    if (text !== undefined && text !== null) e.textContent = String(text);
+    if (cls) e.className = cls;
+    return e;
+  }
+  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
+  async function doImport() {
+    var fileEl = document.getElementById("csvfile");
+    var out = document.getElementById("import-result");
+    clear(out);
+    if (!fileEl.files || fileEl.files.length === 0) {
+      out.appendChild(elem("div", "CSVファイルを選択してください。", "err-rows"));
+      return;
+    }
+    var token = await A.getToken();
+    if (!token) { out.appendChild(elem("div", "認証が必要です。", "err-rows")); return; }
+
+    var fd = new FormData();
+    fd.append("file", fileEl.files[0]);
+    out.textContent = "取込中…";
+    try {
+      // multipart/form-data は Content-Type を手動設定せず、boundary 生成をブラウザに任せる
+      var res = await fetch("/api/admin/note/import", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "X-Device-Id": A.deviceId },
+        body: fd
+      });
+      var body = await res.json();
+      clear(out);
+      if (body.result === "OK") {
+        var d = body.data;
+        var summary = elem("div", null, "result-summary");
+        summary.appendChild(elem("span", "読込: " + d.read));
+        summary.appendChild(elem("span", "取込: " + d.imported));
+        summary.appendChild(elem("span", "対象外(チップ等): " + d.ignoredTips));
+        summary.appendChild(elem("span", "重複スキップ: " + d.duplicates));
+        summary.appendChild(elem("span", "エラー: " + d.errors.length));
+        out.appendChild(summary);
+        if (d.errors.length > 0) {
+          var errBox = elem("div", null, "err-rows");
+          errBox.appendChild(elem("strong", "エラー行:"));
+          var ul = elem("ul");
+          d.errors.forEach(function (e) {
+            var li = elem("li", "行" + e.line + ": " + (e.contentName || "") + " / 取引ID: " + (e.transactionId || "") + " （" + e.reason + "）");
+            ul.appendChild(li);
+          });
+          errBox.appendChild(ul);
+          out.appendChild(errBox);
+        }
+        loadList(true);
+      } else {
+        out.appendChild(elem("div", "取込に失敗しました: " + (body.error && body.error.message), "err-rows"));
+      }
+    } catch (e) {
+      clear(out);
+      out.appendChild(elem("div", "取込に失敗しました。", "err-rows"));
+    }
+  }
+
+  function makeActionButtons(r) {
+    var wrap = elem("div", null, "row-actions");
+    if (r.matchStatus === 1) {
+      var unlinkBtn = elem("button", "紐付け解除");
+      unlinkBtn.addEventListener("click", async function () {
+        // A.apiPut は成功時に data 部分を返し、失敗時は例外を投げる。
+        try {
+          var pre = await A.apiPut("/api/admin/note/purchases/" + r.notePurchaseId, { action: "unlink" });
+          if (pre && pre.requiresConfirm) {
+            var imp = pre.impact;
+            var ok = confirm("この解除により以下へ影響します。実行しますか？\n" +
+              "T_PURCHASE ID: " + (imp.affectedPurchaseId || "なし") + "\n" +
+              "対象ユーザー: " + (imp.affectedAuthUserId || "なし"));
+            if (ok) {
+              try {
+                await A.apiPut("/api/admin/note/purchases/" + r.notePurchaseId, { action: "unlink", confirm: true });
+                alert("解除しました。");
+              } catch (e) {
+                alert("解除に失敗しました。");
+              }
+              loadList(false);
+            }
+          } else {
+            alert("影響取得に失敗しました。");
+          }
+        } catch (e) {
+          alert("影響取得に失敗しました。");
+        }
+      });
+      wrap.appendChild(unlinkBtn);
+    } else {
+      var linkBtn = elem("button", "手動紐付け");
+      linkBtn.addEventListener("click", async function () {
+        var uid = prompt("紐付け先の AUTH_USER_ID (UUID) を入力してください");
+        if (!uid) return;
+        try {
+          await A.apiPut("/api/admin/note/purchases/" + r.notePurchaseId, { action: "link", authUserId: uid.trim() });
+          alert("紐付けました。");
+        } catch (e) {
+          alert("失敗: " + (e && e.message ? e.message : "紐付けできませんでした。"));
+        }
+        loadList(false);
+      });
+      wrap.appendChild(linkBtn);
+
+      var flagBtn = elem("button", "要確認");
+      flagBtn.addEventListener("click", async function () {
+        try {
+          await A.apiPut("/api/admin/note/purchases/" + r.notePurchaseId, { action: "flag" });
+          loadList(false);
+        } catch (e) { alert("失敗しました。"); }
+      });
+      wrap.appendChild(flagBtn);
+
+      var invBtn = elem("button", "無効化");
+      invBtn.addEventListener("click", async function () {
+        try {
+          await A.apiPut("/api/admin/note/purchases/" + r.notePurchaseId, { action: "invalidate" });
+          loadList(false);
+        } catch (e) { alert("失敗しました。"); }
+      });
+      wrap.appendChild(invBtn);
+    }
+    return wrap;
+  }
+
+  // ---- ページング状態 ----
+  var PAGE_LIMIT = 100; // 正本 default（api/ADMIN_API.md 上限200・default100）
+  var currentOffset = 0;
+  var lastReturnedCount = 0; // 直近の取得件数（< limit で最終ページ判定）
+
+  function currentFilters() {
+    var qs = [];
+    var tx = document.getElementById("f-txid").value.trim();
+    var nid = document.getElementById("f-noteid").value.trim();
+    var st = document.getElementById("f-status").value;
+    if (tx) qs.push("transactionId=" + encodeURIComponent(tx));
+    if (nid) qs.push("noteId=" + encodeURIComponent(nid));
+    if (st !== "") qs.push("matchStatus=" + st);
+    return qs;
+  }
+
+  function renderPager() {
+    var pager = document.getElementById("pager");
+    clear(pager);
+    var page = Math.floor(currentOffset / PAGE_LIMIT) + 1;
+
+    var prevBtn = elem("button", "前へ");
+    prevBtn.disabled = currentOffset === 0;
+    prevBtn.addEventListener("click", function () {
+      if (currentOffset === 0) return;
+      currentOffset = Math.max(0, currentOffset - PAGE_LIMIT);
+      loadList(false);
+    });
+    pager.appendChild(prevBtn);
+
+    // 返却件数が limit 未満なら最終ページ（次ページなし）
+    var isLastPage = lastReturnedCount < PAGE_LIMIT;
+    var nextBtn = elem("button", "次へ");
+    nextBtn.disabled = isLastPage;
+    nextBtn.addEventListener("click", function () {
+      if (isLastPage) return;
+      currentOffset += PAGE_LIMIT;
+      loadList(false);
+    });
+    pager.appendChild(nextBtn);
+
+    var info = elem("span", "ページ " + page + (isLastPage ? "（最終）" : ""), "page-info");
+    pager.appendChild(info);
+  }
+
+  /**
+   * 一覧を読み込む。
+   * @param {boolean} resetOffset true のとき先頭ページ（offset=0）へ戻す。
+   *   検索条件・移行状態の変更、CSV取込後、手動補正後の再読込で使用する。
+   */
+  async function loadList(resetOffset) {
+    if (resetOffset) currentOffset = 0;
+    var listEl = document.getElementById("list");
+    var qs = currentFilters();
+    qs.push("limit=" + PAGE_LIMIT);
+    qs.push("offset=" + currentOffset);
+    clear(listEl);
+    listEl.textContent = "読み込み中…";
+    try {
+      // A.apiGet は共通 handleRes 経由で body.data を返す（result==="OK" のときのみ）。
+      // したがって戻り値は既に data 部分（{ purchases: [...] }）。二重に .data を掘らない。
+      var data = await A.apiGet("/api/admin/note/purchases?" + qs.join("&"));
+      clear(listEl);
+      if (!data || !Array.isArray(data.purchases)) {
+        listEl.appendChild(elem("div", "取得に失敗しました。", "err-rows"));
+        clear(document.getElementById("pager"));
+        return;
+      }
+      var rows = data.purchases;
+      lastReturnedCount = rows.length;
+
+      if (rows.length === 0) {
+        // 先頭ページで0件＝該当なし。2ページ目以降で0件＝行き過ぎたので前ページへ戻す。
+        if (currentOffset === 0) {
+          listEl.textContent = "該当データなし";
+        } else {
+          currentOffset = Math.max(0, currentOffset - PAGE_LIMIT);
+          await loadList(false);
+          return;
+        }
+        renderPager();
+        return;
+      }
+
+      var table = elem("table");
+      var thead = elem("thead");
+      var htr = elem("tr");
+      ["ID", "商品", "購入者名", "取引ID", "購入日時", "金額", "移行状態", "移行先", "操作"].forEach(function (h) {
+        htr.appendChild(elem("th", h));
+      });
+      thead.appendChild(htr);
+      table.appendChild(thead);
+
+      var tbody = elem("tbody");
+      rows.forEach(function (r) {
+        var tr = elem("tr");
+        tr.appendChild(elem("td", r.notePurchaseId));
+        tr.appendChild(elem("td", r.productCode));
+        tr.appendChild(elem("td", r.noteId || ""));
+        tr.appendChild(elem("td", r.transactionId));
+        tr.appendChild(elem("td", r.purchaseDate));
+        tr.appendChild(elem("td", r.amount));
+        tr.appendChild(elem("td", MATCH[r.matchStatus] || r.matchStatus));
+        tr.appendChild(elem("td", r.matchAuthUserId || ""));
+        var tdAct = elem("td");
+        tdAct.appendChild(makeActionButtons(r));
+        tr.appendChild(tdAct);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      listEl.appendChild(table);
+      renderPager();
+    } catch (e) {
+      clear(listEl);
+      listEl.appendChild(elem("div", "取得に失敗しました。", "err-rows"));
+      clear(document.getElementById("pager"));
+    }
+  }
+
+  document.getElementById("import-btn").addEventListener("click", doImport);
+  // 検索・移行状態変更は先頭ページへ戻す
+  document.getElementById("search-btn").addEventListener("click", function () { loadList(true); });
+  loadList(true);
+})();
+</script>
+</body>
+</html>

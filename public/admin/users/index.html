@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1024" />
+<title>管理コンソール | ユーザー</title>
+<link rel="stylesheet" href="/admin/assets/admin.css" />
+</head>
+<body>
+<header class="admin-header">
+  <h1>管理コンソール</h1>
+  <nav>
+    <a href="/admin/">ダッシュボード</a>
+    <a href="/admin/users/">ユーザー</a>
+    <a href="/admin/warnings/">Warning</a>
+    <a href="/admin/note/">note移行</a>
+    <a href="/admin/products/">商品</a>
+  </nav>
+</header>
+<main>
+  <h2>ユーザー一覧</h2>
+  <div class="filters">
+    <input id="f-email" type="text" placeholder="メールアドレス部分一致" />
+    <select id="f-status">
+      <option value="">状態: すべて</option>
+      <option value="0">仮登録</option>
+      <option value="1">有効</option>
+      <option value="2">一時停止</option>
+      <option value="9">退会</option>
+    </select>
+    <select id="f-product">
+      <option value="">商品: すべて</option>
+    </select>
+    <button id="btn-search">検索</button>
+  </div>
+  <div id="result"></div>
+</main>
+
+<script src="/admin/assets/vendor/supabase.js"></script>
+<script src="/admin/assets/admin.js"></script>
+<script>
+(async function () {
+  var A = self.AdminUI;
+  var result = document.getElementById("result");
+  var fEmail = document.getElementById("f-email");
+  var fStatus = document.getElementById("f-status");
+  var fProduct = document.getElementById("f-product");
+
+  // 商品プルダウンを既存の公開 API から構築（管理APIを増やさない）
+  try {
+    var res = await fetch("/api/products");
+    var body = await res.json();
+    if (body && body.result === "OK") {
+      (body.data.products || []).forEach(function (p) {
+        var opt = A.el("option", p.name);
+        opt.value = p.code;
+        fProduct.appendChild(opt);
+      });
+    }
+  } catch (e) { /* 商品取得失敗時はフィルタ無しで継続 */ }
+
+  async function search() {
+    A.setLoading(result);
+    try {
+      var params = new URLSearchParams();
+      if (fEmail.value.trim()) params.set("email", fEmail.value.trim());
+      if (fStatus.value) params.set("status", fStatus.value);
+      if (fProduct.value) params.set("productCode", fProduct.value);
+      var data = await A.apiGet("/api/admin/users?" + params.toString());
+      if (!data) return;
+      render(data.users || []);
+    } catch (e) {
+      A.setError(result, e.message);
+    }
+  }
+
+  function render(users) {
+    A.clear(result);
+    if (users.length === 0) {
+      result.appendChild(A.el("div", "該当ユーザーはいません。", "notice"));
+      return;
+    }
+    var table = A.el("table");
+    var thead = A.el("thead");
+    var htr = A.el("tr");
+    ["メール", "状態", "保有商品", "登録日時", "最終ログイン", "最終アクセス", ""].forEach(function (h) {
+      htr.appendChild(A.el("th", h));
+    });
+    thead.appendChild(htr); table.appendChild(thead);
+    var tbody = A.el("tbody");
+    users.forEach(function (u) {
+      var tr = A.el("tr");
+      tr.appendChild(A.td(u.email));
+      tr.appendChild(A.td(A.label(A.maps.USER_STATUS, u.status)));
+      tr.appendChild(A.td((u.products || []).join(", ")));
+      tr.appendChild(A.td(u.createdAt));
+      tr.appendChild(A.td(u.lastLoginAt));
+      tr.appendChild(A.td(u.lastAccessAt));
+      var link = A.el("a", "詳細", "btn-link");
+      link.href = "/admin/users/detail.html?id=" + encodeURIComponent(u.authUserId);
+      var cell = A.el("td"); cell.appendChild(link); tr.appendChild(cell);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    result.appendChild(table);
+  }
+
+  document.getElementById("btn-search").addEventListener("click", search);
+  fEmail.addEventListener("keydown", function (e) { if (e.key === "Enter") search(); });
+  search();
+})();
+</script>
+</body>
+</html>

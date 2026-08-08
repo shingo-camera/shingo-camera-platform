@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1024" />
+<title>管理コンソール | ユーザー詳細</title>
+<link rel="stylesheet" href="/admin/assets/admin.css" />
+</head>
+<body>
+<header class="admin-header">
+  <h1>管理コンソール</h1>
+  <nav>
+    <a href="/admin/">ダッシュボード</a>
+    <a href="/admin/users/">ユーザー</a>
+    <a href="/admin/warnings/">Warning</a>
+    <a href="/admin/note/">note移行</a>
+    <a href="/admin/products/">商品</a>
+  </nav>
+</header>
+<main>
+  <h2>ユーザー詳細</h2>
+  <div id="msg"></div>
+  <div id="detail"></div>
+</main>
+
+<script src="/admin/assets/vendor/supabase.js"></script>
+<script src="/admin/assets/admin.js"></script>
+<script>
+(async function () {
+  var A = self.AdminUI;
+  var msg = document.getElementById("msg");
+  var root = document.getElementById("detail");
+
+  var params = new URLSearchParams(location.search);
+  var authUserId = params.get("id");
+  var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!authUserId || !UUID_RE.test(authUserId)) {
+    A.setError(root, "ユーザーIDが不正です。");
+    return;
+  }
+
+  var productList = [];
+  try {
+    var pr = await fetch("/api/products");
+    var pb = await pr.json();
+    if (pb && pb.result === "OK") productList = pb.data.products || [];
+  } catch (e) { /* continue */ }
+
+  function showMsg(text, kind) {
+    A.clear(msg);
+    msg.appendChild(A.el("div", text, kind === "error" ? "error" : "notice"));
+  }
+
+  async function load() {
+    A.setLoading(root);
+    try {
+      var d = await A.apiGet("/api/admin/users/" + encodeURIComponent(authUserId));
+      if (!d) return;
+      render(d);
+    } catch (e) {
+      A.setError(root, e.message);
+    }
+  }
+
+  function section(title) {
+    var h = A.el("h3", title);
+    root.appendChild(h);
+  }
+  function table(headers, rows, rowFn) {
+    var t = A.el("table");
+    var thead = A.el("thead");
+    var htr = A.el("tr");
+    headers.forEach(function (h) { htr.appendChild(A.el("th", h)); });
+    thead.appendChild(htr); t.appendChild(thead);
+    var tbody = A.el("tbody");
+    if (rows.length === 0) {
+      var tr = A.el("tr");
+      var tdc = A.el("td", "データなし");
+      tdc.colSpan = headers.length;
+      tdc.className = "muted";
+      tr.appendChild(tdc); tbody.appendChild(tr);
+    } else {
+      rows.forEach(function (r) { tbody.appendChild(rowFn(r)); });
+    }
+    t.appendChild(tbody);
+    root.appendChild(t);
+  }
+
+  function render(d) {
+    A.clear(root);
+    var u = d.user;
+
+    // 基本情報
+    section("基本情報");
+    var info = A.el("table");
+    var tb = A.el("tbody");
+    function infoRow(k, v) {
+      var tr = A.el("tr");
+      var th = A.el("th", k); th.style.width = "180px";
+      tr.appendChild(th); tr.appendChild(A.td(v));
+      return tr;
+    }
+    tb.appendChild(infoRow("AUTH_USER_ID", u.AUTH_USER_ID));
+    tb.appendChild(infoRow("メールアドレス", u.LOGIN_MAIL));
+    tb.appendChild(infoRow("状態", A.label(A.maps.USER_STATUS, u.STATUS)));
+    tb.appendChild(infoRow("メール認証日時", u.MAIL_AUTH_DATE));
+    tb.appendChild(infoRow("パスワード変更日時", u.PASSWORD_CHANGE_DATE));
+    tb.appendChild(infoRow("登録日時", u.CREATE_DATE));
+    tb.appendChild(infoRow("最終ログイン日時", u.LAST_LOGIN_DATE));
+    info.appendChild(tb);
+    root.appendChild(info);
+
+    // ユーザー状態操作（停止/再開/退会）
+    var ops = A.el("div", null, "row-actions");
+    ops.style.marginTop = "10px";
+    var btnSuspend = A.el("button", "ユーザー停止", "danger");
+    btnSuspend.addEventListener("click", function () { changeStatus(2, "このユーザーを一時停止しますか？"); });
+    var btnResume = A.el("button", "ユーザー再開", "secondary");
+    btnResume.addEventListener("click", function () { changeStatus(1, "このユーザーを有効化しますか？"); });
+    var btnWithdraw = A.el("button", "退会", "danger");
+    btnWithdraw.addEventListener("click", function () { changeStatus(9, "このユーザーを退会状態にしますか？（元に戻すには再度有効化が必要です）"); });
+    ops.appendChild(btnSuspend); ops.appendChild(btnResume); ops.appendChild(btnWithdraw);
+    root.appendChild(ops);
+    // パスワード再設定メール送信は WORK-006 では未実装（ボタンを置かない）
+    var pwNote = A.el("div", "パスワード再設定メール送信は未実装です。", "muted");
+    pwNote.style.marginTop = "6px";
+    root.appendChild(pwNote);
+
+    // 商品権限
+    section("商品権限");
+    table(
+      ["商品", "状態", "開始日時", "終了日時", "付与区分", "MEMO", "操作"],
+      d.products,
+      function (p) {
+        var tr = A.el("tr");
+        tr.appendChild(A.td(p.productCode));
+        tr.appendChild(A.td(A.label(A.maps.UP_STATUS, p.status)));
+        tr.appendChild(A.td(p.startDate));
+        tr.appendChild(A.td(p.endDate));
+        tr.appendChild(A.td(A.label(A.maps.GRANT_TYPE, p.grantType)));
+        tr.appendChild(A.td(p.memo));
+        var cell = A.el("td");
+        var wrap = A.el("div", null, "row-actions");
+        if (p.status === 1) {
+          var bs = A.el("button", "停止", "danger");
+          bs.addEventListener("click", function () { productOp(p.productCode, { status: 2 }, "「" + p.productCode + "」の権限を停止しますか？"); });
+          wrap.appendChild(bs);
+        } else {
+          var br = A.el("button", "再開", "secondary");
+          br.addEventListener("click", function () { productOp(p.productCode, { status: 1 }, "「" + p.productCode + "」の権限を再開しますか？"); });
+          wrap.appendChild(br);
+        }
+        cell.appendChild(wrap);
+        tr.appendChild(cell);
+        return tr;
+      }
+    );
+
+    // 商品権限の新規付与フォーム
+    var grantBox = A.el("div", null, "card");
+    grantBox.appendChild(A.el("div", "商品権限を付与", "muted"));
+    var form = A.el("form", null, "inline");
+    form.addEventListener("submit", function (e) { e.preventDefault(); });
+    var selProduct = A.el("select");
+    productList.forEach(function (p) {
+      var opt = A.el("option", p.name + " (" + p.code + ")");
+      opt.value = p.code;
+      selProduct.appendChild(opt);
+    });
+    var lblP = A.el("label", null, "field"); lblP.appendChild(A.el("span", "商品")); lblP.appendChild(selProduct);
+    var inStart = A.el("input"); inStart.type = "text"; inStart.placeholder = "2026-08-05T18:00:00+09:00";
+    var lblS = A.el("label", null, "field"); lblS.appendChild(A.el("span", "開始日時")); lblS.appendChild(inStart);
+    var inEnd = A.el("input"); inEnd.type = "text"; inEnd.value = "9999-12-31T23:59:59+09:00";
+    var lblE = A.el("label", null, "field"); lblE.appendChild(A.el("span", "終了日時")); lblE.appendChild(inEnd);
+    var inMemo = A.el("input"); inMemo.type = "text"; inMemo.placeholder = "MEMO";
+    var lblM = A.el("label", null, "field"); lblM.appendChild(A.el("span", "MEMO")); lblM.appendChild(inMemo);
+    var btnGrant = A.el("button", "付与");
+    btnGrant.addEventListener("click", function () {
+      var code = selProduct.value;
+      if (!code) return;
+      var payload = { status: 1, grantType: 3 };
+      if (inStart.value.trim()) payload.startAt = inStart.value.trim();
+      if (inEnd.value.trim()) payload.endAt = inEnd.value.trim();
+      if (inMemo.value.trim()) payload.memo = inMemo.value.trim();
+      productOp(code, payload, "「" + code + "」の権限を付与しますか？");
+    });
+    form.appendChild(lblP); form.appendChild(lblS); form.appendChild(lblE); form.appendChild(lblM); form.appendChild(btnGrant);
+    grantBox.appendChild(form);
+    root.appendChild(grantBox);
+
+    // 購入履歴
+    section("購入履歴");
+    table(
+      ["購入日時", "商品", "購入元", "金額", "支払状態", "外部購入ID"],
+      d.purchases,
+      function (r) {
+        var tr = A.el("tr");
+        tr.appendChild(A.td(r.purchaseDate));
+        tr.appendChild(A.td(r.productCode));
+        tr.appendChild(A.td(A.label(A.maps.PUR_SOURCE, r.purchaseSource)));
+        tr.appendChild(A.td(r.amount));
+        tr.appendChild(A.td(A.label(A.maps.PAY_STATUS, r.paymentStatus)));
+        tr.appendChild(A.td(r.externalPurchaseId));
+        return tr;
+      }
+    );
+
+    // note移行履歴（表示のみ）
+    section("note移行履歴（表示のみ）");
+    table(
+      ["NOTE_ID", "取引ID", "商品", "note購入日時", "移行状態", "移行日時"],
+      d.notePurchases,
+      function (r) {
+        var tr = A.el("tr");
+        tr.appendChild(A.td(r.noteId));
+        tr.appendChild(A.td(r.noteTransactionId));
+        tr.appendChild(A.td(r.productCode));
+        tr.appendChild(A.td(r.purchaseDate));
+        tr.appendChild(A.td(A.label(A.maps.MATCH_STATUS, r.matchStatus)));
+        tr.appendChild(A.td(r.matchDate));
+        return tr;
+      }
+    );
+
+    // アクセス履歴
+    section("アクセス履歴（新しい順）");
+    table(
+      ["日時", "商品", "種別", "国", "地域", "市区", "IP", "DEVICE_ID"],
+      d.accessLogs,
+      function (r) {
+        var tr = A.el("tr");
+        tr.appendChild(A.td(r.accessDate));
+        tr.appendChild(A.td(r.productCode));
+        tr.appendChild(A.td(A.label(A.maps.ACCESS_TYPE, r.accessType)));
+        tr.appendChild(A.td(r.country));
+        tr.appendChild(A.td(r.region));
+        tr.appendChild(A.td(r.city));
+        tr.appendChild(A.td(r.ip));
+        tr.appendChild(A.td(r.deviceId));
+        return tr;
+      }
+    );
+
+    // Warning
+    section("Warning");
+    table(
+      ["種別", "スコア", "検知日時", "状態", "MEMO"],
+      d.warnings,
+      function (r) {
+        var tr = A.el("tr");
+        tr.appendChild(A.td(r.warningType));
+        tr.appendChild(A.td(r.warningScore));
+        tr.appendChild(A.td(r.detectDate));
+        tr.appendChild(A.td(A.label(A.maps.WARN_STATUS, r.status)));
+        tr.appendChild(A.td(r.memo));
+        return tr;
+      }
+    );
+  }
+
+  async function changeStatus(status, confirmText) {
+    if (!confirm(confirmText)) return;
+    try {
+      await A.apiPut("/api/admin/users/" + encodeURIComponent(authUserId) + "/status", { status: status });
+      showMsg("状態を更新しました。", "notice");
+      load();
+    } catch (e) {
+      showMsg(e.message, "error");
+    }
+  }
+  async function productOp(code, payload, confirmText) {
+    if (!confirm(confirmText)) return;
+    try {
+      await A.apiPut(
+        "/api/admin/users/" + encodeURIComponent(authUserId) + "/products/" + encodeURIComponent(code),
+        payload
+      );
+      showMsg("商品権限を更新しました。", "notice");
+      load();
+    } catch (e) {
+      showMsg(e.message, "error");
+    }
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

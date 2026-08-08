@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>note購入の移行</title>
+<link rel="stylesheet" href="/assets/common.css" />
+<style>
+  .mig-box { max-width: 520px; margin: 40px auto; padding: 24px; }
+  .section { margin-bottom: 28px; }
+  .section h2 { font-size: 18px; margin-bottom: 12px; }
+  .migrated-item { padding: 8px 12px; background: #f2f6f2; border-radius: 6px; margin-bottom: 6px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; margin-bottom: 6px; font-weight: 600; }
+  .field select, .field input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+  .hint { font-size: 13px; color: #667; margin-top: 6px; }
+  button.primary { padding: 12px 20px; background: #23303e; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+  .result { margin-top: 16px; padding: 12px; border-radius: 6px; }
+  .result.ok { background: #e7f5ea; color: #1f6b34; }
+  .result.err { background: #fdecec; color: #a12; }
+  .empty { color: #778; }
+</style>
+</head>
+<body>
+<div class="mig-box">
+  <h1>note購入の移行</h1>
+
+  <div class="section" id="migrated-section">
+    <h2>移行済みの商品</h2>
+    <div id="migrated-list"><span class="empty">読み込み中…</span></div>
+  </div>
+
+  <div class="section">
+    <h2>購入の移行</h2>
+    <p class="hint">noteでHANABI PLANNERまたはGoogle Earth Pro連携をご購入の方は、取引IDを入力して移行できます。</p>
+
+    <div class="field">
+      <label for="product">商品</label>
+      <select id="product">
+        <option value="HANABI">HANABI PLANNER</option>
+        <option value="HANABI_GOOGLE_EARTH">HANABI PLANNER Google Earth Pro連携</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="txid">note取引ID</label>
+      <input id="txid" type="text" autocomplete="off" placeholder="取引ID" />
+      <div class="hint">取引IDは、noteの「設定」→「購入・チップ履歴」→対象購入の「領収書」から確認できます。</div>
+    </div>
+
+    <button class="primary" id="submit">移行する</button>
+    <div id="result"></div>
+  </div>
+</div>
+
+<script src="/assets/vendor/supabase.js"></script>
+<script>
+(function () {
+  var deviceId = (function () {
+    try {
+      var k = "scp_device_id", v = localStorage.getItem(k);
+      if (!v) { v = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()); localStorage.setItem(k, v); }
+      return v;
+    } catch (e) { return String(Date.now()); }
+  })();
+
+  // Supabase client は画面内で 1 度だけ生成してキャッシュする（複数 GoTrueClient 生成を防ぐ）。
+  // 初回だけ /api/config を取得して createClient し、2 回目以降は同じ client を再利用する。
+  var clientPromise = null;
+  function getClient() {
+    if (clientPromise) return clientPromise;
+    clientPromise = (async function () {
+      var res = await fetch("/api/config", { headers: { "X-Device-Id": deviceId } });
+      if (!res.ok) return null;
+      var body = await res.json();
+      if (!self.supabase || !self.supabase.createClient) return null;
+      return self.supabase.createClient(body.data.supabaseUrl, body.data.supabaseAnonKey);
+    })();
+    return clientPromise;
+  }
+
+  async function getToken() {
+    var client = await getClient();
+    if (!client) return null;
+    var s = await client.auth.getSession();
+    return s && s.data && s.data.session ? s.data.session.access_token : null;
+  }
+
+  var PRODUCT_LABEL = {
+    "HANABI": "HANABI PLANNER",
+    "HANABI_GOOGLE_EARTH": "HANABI PLANNER Google Earth Pro連携"
+  };
+
+  async function loadStatus() {
+    var listEl = document.getElementById("migrated-list");
+    function setEmpty(msg) {
+      while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+      var span = document.createElement("span");
+      span.className = "empty";
+      span.textContent = msg;
+      listEl.appendChild(span);
+    }
+    var token = await getToken();
+    if (!token) {
+      setEmpty("状態を確認するにはログインしてください。");
+      return;
+    }
+    try {
+      var res = await fetch("/api/migrations/note/status", {
+        headers: { Authorization: "Bearer " + token, "X-Device-Id": deviceId }
+      });
+      var body = await res.json();
+      if (body && body.result === "OK" && body.data.migrations.length > 0) {
+        while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+        body.data.migrations.forEach(function (m) {
+          var name = PRODUCT_LABEL[m.productCode] || m.productCode;
+          var div = document.createElement("div");
+          div.className = "migrated-item";
+          // textContent 経由なので HTML として解釈されない
+          div.textContent = name + "（移行日時: " + (m.matchedAt || "") + "）";
+          listEl.appendChild(div);
+        });
+      } else {
+        setEmpty("まだ移行済みの商品はありません。");
+      }
+    } catch (e) {
+      setEmpty("状態の取得に失敗しました。");
+    }
+  }
+
+  async function submitMigration() {
+    var btn = document.getElementById("submit");
+    var resultEl = document.getElementById("result");
+    var productCode = document.getElementById("product").value;
+    var transactionId = document.getElementById("txid").value.trim();
+    resultEl.textContent = "";
+
+    if (!transactionId) {
+      resultEl.className = "result err";
+      resultEl.textContent = "取引IDを入力してください。";
+      return;
+    }
+
+    var token = await getToken();
+    if (!token) {
+      resultEl.className = "result err";
+      resultEl.textContent = "ログインが必要です。";
+      return;
+    }
+
+    btn.disabled = true;
+    try {
+      var res = await fetch("/api/migrations/note/apply", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + token,
+          "X-Device-Id": deviceId
+        },
+        body: JSON.stringify({ productCode: productCode, transactionId: transactionId })
+      });
+      var body = await res.json();
+      if (body && body.result === "OK") {
+        resultEl.className = "result ok";
+        resultEl.textContent = "移行が完了しました。商品をご利用いただけます。";
+        document.getElementById("txid").value = "";
+        await loadStatus();
+      } else {
+        resultEl.className = "result err";
+        resultEl.textContent = (body && body.error && body.error.message)
+          ? body.error.message
+          : "購入情報を確認できませんでした。入力内容をご確認ください。";
+      }
+    } catch (e) {
+      resultEl.className = "result err";
+      resultEl.textContent = "購入情報を確認できませんでした。入力内容をご確認ください。";
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  document.getElementById("submit").addEventListener("click", submitMigration);
+  loadStatus();
+})();
+</script>
+</body>
+</html>

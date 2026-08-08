@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>ログイン | shingo-camera Platform</title>
+  <link rel="stylesheet" href="/assets/common.css" />
+  <link rel="stylesheet" href="/assets/auth.css" />
+</head>
+<body data-page="login">
+  <div class="wrap">
+    <div class="card">
+      <p class="brand">shingo-camera Platform</p>
+      <h1>ログイン</h1>
+
+      <label for="email">メールアドレス</label>
+      <input id="email" type="email" autocomplete="email" placeholder="you@example.com" />
+
+      <label for="password">パスワード</label>
+      <input id="password" type="password" autocomplete="current-password" />
+
+      <button id="submit" type="button">ログイン</button>
+      <button id="logout" type="button" style="background:transparent;border:1px solid var(--border);color:var(--muted);margin-top:10px;">ログアウト</button>
+
+      <p id="msg" class="msg"></p>
+      <div id="session" class="session-box"></div>
+
+      <div class="links">
+        <a href="/signup/">新規登録</a>
+        <a href="/forgot-password/">パスワードをお忘れの方</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/vendor/supabase.js"></script>
+  <script src="/assets/auth.js"></script>
+</body>
+</html>

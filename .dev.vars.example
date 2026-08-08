@@ -1,0 +1,44 @@
+# .dev.vars.example
+#
+# ローカル開発用の環境変数・Secrets の「例」。
+# このファイルは値を含めず、キーの一覧のみを示す。
+#
+# 使い方:
+#   1. cp .dev.vars.example .dev.vars
+#   2. .dev.vars に実値を記入する（.dev.vars は .gitignore で除外済み）
+#   3. wrangler dev は .dev.vars を自動で読み込む
+#
+# Production への登録は wrangler secret put <KEY> を用いる。
+#   例: wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#
+# 重要:
+#   - 実値をこのファイルや Git へ保存しない（SECURITY.md 2, WORK-001 完了条件）
+#   - Service Role Key / Stripe Secret / Webhook Secret 等はフロントへ渡さない
+#
+# --- 非秘密の環境変数 ---
+# APP_ENV は実行環境識別子。秘密情報ではないが、ローカルで local を
+# 使いたい場合は .dev.vars に置くと wrangler dev 実行時に優先される。
+# Production では wrangler.toml [vars] の production が使われる。
+APP_ENV=local
+
+# SUPABASE_URL / SUPABASE_ANON_KEY はフロントへ配布してよい非秘密値。
+# ただしプロジェクト運用として Git へ実値を保存しない。
+#   Local     : このファイルをコピーした .dev.vars に実値を記入（Git 除外）
+#   Production : Cloudflare 側の環境変数として登録
+#               （wrangler の設定、またはダッシュボード Settings > Variables）
+# フロントへは /api/config 経由で渡す（静的HTMLへハードコードしない）。
+# wrangler.toml へは書かない。
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+
+# --- 秘密情報（フロントへ絶対に渡さない）---
+# 下記は SECURITY.md 2 に定義された秘密情報。Secret として登録する。
+#   例: wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+# WORK-003 では SERVICE_ROLE_KEY は未使用（後続 WORK で利用）。
+
+SUPABASE_SERVICE_ROLE_KEY=
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_PRICE_SUN_AND_MOON=
+ADMIN_AUTH_USER_ID=
+MAIL_API_KEY=

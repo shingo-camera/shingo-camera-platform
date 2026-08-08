@@ -1,0 +1,86 @@
+# wrangler.toml
+#
+# Cloudflare Workers 設定（WORK-001 共通基盤）
+#
+# 環境方針: Local と Production（非公開）のみ。専用 Staging は作らない。
+#   設計根拠: ADR-011_LOCAL_AND_PRODUCTION_ONLY.md
+#
+# 非公開の維持方法:
+#   workers.dev の標準ドメインで到達可能にし、公開用カスタムドメインは
+#   紐付けない。公開時に routes / custom domain を追加する。
+#
+# 秘密情報はこのファイルへ書かない。`wrangler secret put` で登録する。
+#   設計根拠: SECURITY.md 2, CLAUDE.md「秘密キーのフロント埋込」禁止
+
+name = "shingo-camera-platform"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+
+# 標準ドメイン(*.workers.dev)で到達可能にする。
+# カスタムドメイン未紐付けのため、URL を知る者のみアクセスできる非公開状態。
+workers_dev = true
+
+# Dashboard で管理している Production の通常環境変数（SUPABASE_URL /
+# SUPABASE_ANON_KEY 等）を、wrangler deploy 時に削除・上書きしない。
+#   背景: wrangler は [vars] を宣言的に同期するため、toml に無い変数を
+#         deploy が消してしまう。keep_vars=true で Dashboard 設定を保持する。
+#   これにより npm run deploy（--keep-vars を書かなくても）で保持される。
+#   秘密情報は引き続き Secret（wrangler secret put）で管理する。
+keep_vars = true
+
+# 通常の環境変数（秘密情報ではない）。
+# APP_ENV は /api/health の environment 表示等に使う実行環境識別子。
+# Production ではこの値(production)が使われる。
+# Local(wrangler dev)では .dev.vars の APP_ENV=local が優先される。
+#
+# SUPABASE_URL / SUPABASE_ANON_KEY はここへ書かない（実値・プレースホルダとも）。
+#   Local     : .dev.vars に記入（Git 除外）
+#   Production : Cloudflare 側の環境変数として登録（wrangler で設定、または
+#               ダッシュボードの Settings > Variables and Secrets）
+# コードは env.SUPABASE_URL / env.SUPABASE_ANON_KEY で参照する。
+# SUPABASE_SERVICE_ROLE_KEY は Secret として別管理し、フロントへ渡さない。
+[vars]
+APP_ENV = "production"
+
+# Workers Static Assets（WORK-003）
+#
+# 責務分担:
+#   /api/*   → Worker を先に実行（run_worker_first）
+#   それ以外 → public/ 配下の静的ファイルを配信
+#
+# html_handling = "auto-trailing-slash":
+#   /login → /login/ へ正規化し、public/login/index.html を返す。
+# not_found_handling = "none":
+#   存在しない通常画面は Static Assets 側の 404。SPA フォールバックはしない。
+#
+# ASSETS binding は Worker から静的ファイルを明示取得しないため追加しない。
+[assets]
+directory = "./public"
+run_worker_first = ["/api/*"]
+html_handling = "auto-trailing-slash"
+not_found_handling = "none"
+
+# 観測性を有効化し、内部エラー等をログで確認できるようにする。
+# 設計根拠: SECURITY.md 10「内部詳細は Cloudflare ログへ記録」
+[observability]
+enabled = true
+
+# Cloudflare D1 バインディング（WORK-002）
+#
+# database_id は作成済み D1 の実値。これはリソース識別子であり秘密情報では
+# ないため wrangler.toml で管理する（Cloudflare 標準の運用）。
+# この値を維持すること（プレースホルダへ戻さない）。
+#   設計根拠: DATABASE.md, WORK-002_D1_SETUP.md
+#
+# migration は migrations/ ディレクトリを使用する。
+#   local 適用   : wrangler d1 migrations apply shingo-camera-platform --local
+#   production適用: wrangler d1 migrations apply shingo-camera-platform --remote
+[[d1_databases]]
+binding = "DB"
+database_name = "shingo-camera-platform"
+database_id = "52a29812-4239-4dc5-985b-a77cffca09ae"
+migrations_dir = "migrations"
+
+# 環境変数・Secrets は後続 WORK で追加する。
+# 例は .dev.vars.example / README.md を参照。
+# 実際の Secrets はコードにも Git にも保存しない。

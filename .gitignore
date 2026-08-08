@@ -1,0 +1,19 @@
+# 依存・生成物
+node_modules/
+dist/
+.wrangler/
+
+# 秘密情報（Git へ絶対に含めない）
+# 設計根拠: WORK-001 完了条件「秘密情報が Git へ含まれない」, SECURITY.md 2
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.*
+!.env.example
+
+# ログ・OS・エディタ
+*.log
+.DS_Store
+.idea/
+.vscode/

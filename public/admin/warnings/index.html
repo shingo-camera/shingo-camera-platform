@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1024" />
+<title>管理コンソール | Warning</title>
+<link rel="stylesheet" href="/admin/assets/admin.css" />
+</head>
+<body>
+<header class="admin-header">
+  <h1>管理コンソール</h1>
+  <nav>
+    <a href="/admin/">ダッシュボード</a>
+    <a href="/admin/users/">ユーザー</a>
+    <a href="/admin/warnings/">Warning</a>
+    <a href="/admin/note/">note移行</a>
+    <a href="/admin/products/">商品</a>
+  </nav>
+</header>
+<main>
+  <h2>Warning 一覧</h2>
+  <div id="msg"></div>
+  <div class="filters">
+    <select id="f-status">
+      <option value="">状態: すべて</option>
+      <option value="0">未対応</option>
+      <option value="1">確認済</option>
+      <option value="2">ユーザー確認中</option>
+      <option value="9">除外</option>
+    </select>
+    <input id="f-type" type="text" placeholder="Warning種別" />
+    <button id="btn-search">検索</button>
+  </div>
+  <div id="result"></div>
+</main>
+
+<script src="/admin/assets/vendor/supabase.js"></script>
+<script src="/admin/assets/admin.js"></script>
+<script>
+(async function () {
+  var A = self.AdminUI;
+  var result = document.getElementById("result");
+  var msg = document.getElementById("msg");
+  var fStatus = document.getElementById("f-status");
+  var fType = document.getElementById("f-type");
+
+  function showMsg(text, kind) {
+    A.clear(msg);
+    msg.appendChild(A.el("div", text, kind === "error" ? "error" : "notice"));
+  }
+
+  async function search() {
+    A.setLoading(result);
+    try {
+      var params = new URLSearchParams();
+      if (fStatus.value) params.set("status", fStatus.value);
+      if (fType.value.trim()) params.set("warningType", fType.value.trim());
+      var data = await A.apiGet("/api/admin/warnings?" + params.toString());
+      if (!data) return;
+      render(data.warnings || []);
+    } catch (e) {
+      A.setError(result, e.message);
+    }
+  }
+
+  function render(warnings) {
+    A.clear(result);
+    if (warnings.length === 0) {
+      result.appendChild(A.el("div", "要確認なし", "notice"));
+      return;
+    }
+    var table = A.el("table");
+    var thead = A.el("thead");
+    var htr = A.el("tr");
+    ["対象メール", "商品", "種別", "スコア", "検知日時", "通知日時", "状態", "操作"].forEach(function (h) {
+      htr.appendChild(A.el("th", h));
+    });
+    thead.appendChild(htr); table.appendChild(thead);
+    var tbody = A.el("tbody");
+    warnings.forEach(function (w) {
+      var tr = A.el("tr");
+      tr.appendChild(A.td(w.email));
+      tr.appendChild(A.td(w.productCode));
+      tr.appendChild(A.td(w.warningType));
+      tr.appendChild(A.td(w.warningScore));
+      tr.appendChild(A.td(w.detectDate));
+      tr.appendChild(A.td(w.notifiedDate));
+      tr.appendChild(A.td(A.label(A.maps.WARN_STATUS, w.status)));
+
+      var cell = A.el("td");
+      var sel = A.el("select");
+      [[0, "未対応"], [1, "確認済"], [2, "ユーザー確認中"], [9, "除外"]].forEach(function (o) {
+        var opt = A.el("option", o[1]); opt.value = o[0];
+        if (o[0] === w.status) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      var memo = A.el("input"); memo.type = "text"; memo.placeholder = "MEMO"; memo.style.width = "140px";
+      if (w.memo) memo.value = w.memo;
+      var btn = A.el("button", "更新", "secondary");
+      btn.addEventListener("click", function () {
+        var newStatus = parseInt(sel.value, 10);
+        if (!confirm("Warning #" + w.warningId + " の対応状態を更新しますか？")) return;
+        update(w.warningId, newStatus, memo.value);
+      });
+      var wrap = A.el("div", null, "row-actions");
+      wrap.appendChild(sel); wrap.appendChild(memo); wrap.appendChild(btn);
+      cell.appendChild(wrap);
+      tr.appendChild(cell);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    result.appendChild(table);
+  }
+
+  async function update(warningId, status, memo) {
+    try {
+      var payload = { status: status };
+      if (memo && memo.trim()) payload.memo = memo.trim();
+      await A.apiPut("/api/admin/warnings/" + warningId, payload);
+      showMsg("更新しました。（ユーザー停止は自動実行されません）", "notice");
+      search();
+    } catch (e) {
+      showMsg(e.message, "error");
+    }
+  }
+
+  document.getElementById("btn-search").addEventListener("click", search);
+  search();
+})();
+</script>
+</body>
+</html>

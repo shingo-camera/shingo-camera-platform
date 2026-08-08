@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>購入完了の確認</title>
+<link rel="stylesheet" href="/assets/common.css" />
+<style>
+  .purchase-box { max-width: 480px; margin: 60px auto; padding: 24px; text-align: center; }
+  .status { margin: 20px 0; font-size: 16px; }
+  .status.ok { color: #2e7d43; }
+  .status.pending { color: #665; }
+  .spinner { margin: 16px auto; width: 28px; height: 28px; border: 3px solid #ddd; border-top-color: #23303e; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .actions { margin-top: 24px; }
+  .actions a { color: #1668c1; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="purchase-box">
+  <h1>ご購入ありがとうございます</h1>
+  <div id="status" class="status pending">決済情報を確認しています…</div>
+  <div id="spinner" class="spinner"></div>
+  <div class="actions">
+    <a href="/">トップへ戻る</a>
+  </div>
+</div>
+
+<script src="/assets/vendor/supabase.js"></script>
+<script>
+(async function () {
+  var statusEl = document.getElementById("status");
+  var spinner = document.getElementById("spinner");
+
+  var params = new URLSearchParams(location.search);
+  var productCode = params.get("productCode");
+  if (!productCode) {
+    statusEl.className = "status pending";
+    statusEl.textContent = "商品情報が確認できませんでした。トップから状態をご確認ください。";
+    spinner.style.display = "none";
+    return;
+  }
+
+  // Supabase セッションから access_token を取得
+  var deviceId = (function () {
+    try {
+      var k = "scp_device_id", v = localStorage.getItem(k);
+      if (!v) { v = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()); localStorage.setItem(k, v); }
+      return v;
+    } catch (e) { return String(Date.now()); }
+  })();
+
+  async function getToken() {
+    var res = await fetch("/api/config", { headers: { "X-Device-Id": deviceId } });
+    if (!res.ok) return null;
+    var body = await res.json();
+    if (!self.supabase || !self.supabase.createClient) return null;
+    var client = self.supabase.createClient(body.data.supabaseUrl, body.data.supabaseAnonKey);
+    var s = await client.auth.getSession();
+    return s && s.data && s.data.session ? s.data.session.access_token : null;
+  }
+
+  var token = await getToken();
+  if (!token) {
+    // 未ログインなら状態確認はできない。ログインを促す。
+    statusEl.textContent = "状態を確認するにはログインしてください。";
+    spinner.style.display = "none";
+    return;
+  }
+
+  // status API を数回リトライ（権限付与はしない。Webhook 反映を待つだけ）
+  var maxAttempts = 5;
+  var delayMs = 2000;
+
+  async function check(attempt) {
+    try {
+      var res = await fetch(
+        "/api/purchases/status?productCode=" + encodeURIComponent(productCode),
+        { headers: { Authorization: "Bearer " + token, "X-Device-Id": deviceId } }
+      );
+      var body = await res.json();
+      if (body && body.result === "OK" && body.data.granted === true) {
+        statusEl.className = "status ok";
+        statusEl.textContent = "購入が完了し、ご利用いただけます。";
+        spinner.style.display = "none";
+        return;
+      }
+    } catch (e) { /* リトライ継続 */ }
+
+    if (attempt < maxAttempts) {
+      statusEl.textContent = "決済情報を確認しています…（" + attempt + "/" + maxAttempts + "）";
+      setTimeout(function () { check(attempt + 1); }, delayMs);
+    } else {
+      // 最終的に未反映でもエラー断定しない
+      statusEl.className = "status pending";
+      statusEl.textContent = "決済情報の反映を確認中です。しばらくして再度確認してください。";
+      spinner.style.display = "none";
+    }
+  }
+
+  check(1);
+})();
+</script>
+</body>
+</html>
