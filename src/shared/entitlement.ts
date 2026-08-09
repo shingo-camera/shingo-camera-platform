@@ -20,7 +20,7 @@ import { requireUser, AuthError, type AuthContext } from "./auth";
 import { getDb } from "./db";
 import { getMUser } from "./account";
 import { getSystemSetting } from "./settings";
-import { writeAccessLog, ACCESS_TYPE } from "./logs";
+import { writeAccessLog, ACCESS_TYPE, type AccessType } from "./logs";
 import { getDeviceId } from "./device";
 import { nowIso } from "./datetime";
 import type { Env } from "../index";
@@ -281,6 +281,42 @@ export async function recordEntitlementAccess(
   authUserId: string,
   productId: number,
 ): Promise<void> {
+  await recordAccessWithSuppression(request, env, authUserId, productId, ACCESS_TYPE.ENTITLEMENT_CHECK);
+}
+
+/**
+ * アプリ起動アクセスログ（ACCESS_TYPE=0 / APP_START）を抑制付きで記録する。
+ *
+ * WORK-010 SUN AND MOON 統合で、アプリ画面の起動時に1回だけ呼ぶ。
+ * 各計算APIでは記録せず、これで「アプリ利用開始時に1回」の記録責務を担う。
+ * 抑制条件（同一とみなすキー）: AUTH_USER_ID / PRODUCT_ID / ACCESS_TYPE=0 / DEVICE_ID。
+ * ACCESS_LOG_INTERVAL_MIN 以内の同一条件は記録しない（計算API多数呼び出しでログを増やさない）。
+ *
+ * ENTITLEMENT_CHECK(=1) とは ACCESS_TYPE が異なるため抑制も独立し、
+ * 既存の権限確認ログの意味・挙動には影響しない。
+ *
+ * @throws AccessLogSettingError 設定値が不正なとき
+ */
+export async function recordAppStartAccess(
+  request: Request,
+  env: Env,
+  authUserId: string,
+  productId: number,
+): Promise<void> {
+  await recordAccessWithSuppression(request, env, authUserId, productId, ACCESS_TYPE.APP_START);
+}
+
+/**
+ * 指定 ACCESS_TYPE のアクセスログを、同一条件 ACCESS_LOG_INTERVAL_MIN 抑制付きで記録する内部共通処理。
+ * 抑制キー: AUTH_USER_ID / PRODUCT_ID / ACCESS_TYPE / DEVICE_ID（DEVICE_ID は NULL 同士も一致）。
+ */
+async function recordAccessWithSuppression(
+  request: Request,
+  env: Env,
+  authUserId: string,
+  productId: number,
+  accessType: AccessType,
+): Promise<void> {
   const raw = await getSystemSetting(env, "ACCESS_LOG_INTERVAL_MIN");
   // 設定値検証: 不在 / 非整数 / 負数は内部設定エラー（fallback しない）
   if (raw === null || !/^-?\d+$/.test(raw.trim())) {
@@ -301,12 +337,12 @@ export async function recordEntitlementAccess(
     const last = await db
       .prepare(
         `SELECT ACCESS_DATE FROM T_ACCESS_LOG
-         WHERE AUTH_USER_ID = ? AND PRODUCT_ID = ? AND ACCESS_TYPE = 1
+         WHERE AUTH_USER_ID = ? AND PRODUCT_ID = ? AND ACCESS_TYPE = ?
            AND (DEVICE_ID = ? OR (DEVICE_ID IS NULL AND ? IS NULL))
          ORDER BY ACCESS_DATE DESC
          LIMIT 1`,
       )
-      .bind(authUserId, productId, deviceId, deviceId)
+      .bind(authUserId, productId, accessType, deviceId, deviceId)
       .first<{ ACCESS_DATE: string }>();
 
     if (last) {
@@ -325,7 +361,7 @@ export async function recordEntitlementAccess(
   await writeAccessLog(request, env, {
     authUserId,
     productId,
-    accessType: ACCESS_TYPE.ENTITLEMENT_CHECK,
+    accessType,
   });
 }
 

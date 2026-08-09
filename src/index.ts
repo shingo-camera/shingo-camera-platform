@@ -34,6 +34,8 @@ import { handleNoteImport, handleNoteList, handleNoteUpdate } from "./routes/adm
 import { withErrorHandling } from "./shared/errors";
 import { jsonError } from "./shared/response";
 import { runWarningJob } from "./shared/warning_job";
+import { handleSunAndMoonApi } from "./apps/sun-and-moon/router";
+import { handleSunAndMoonAppStart } from "./apps/sun-and-moon/app_start";
 
 /**
  * 環境変数・Secrets のバインディング型。
@@ -75,7 +77,7 @@ function parsePathSegment(raw: string): string | null {
 }
 
 /** メソッドとパスに応じてハンドラを振り分ける */
-function route(request: Request, env: Env): Response | Promise<Response> {
+function route(request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> {
   const { pathname } = new URL(request.url);
   const method = request.method;
 
@@ -111,6 +113,22 @@ function route(request: Request, env: Env): Response | Promise<Response> {
       return jsonError("PRODUCT_NOT_FOUND", "商品が見つかりません。", 404);
     }
     return handleEntitlement(request, env, code);
+  }
+
+  // SUN AND MOON アプリ固有API（WORK-010）
+  // アプリ起動記録（APP_START アクセスログ）
+  if (method === "POST" && pathname === "/api/apps/sun-and-moon/app-start") {
+    return handleSunAndMoonAppStart(request, env);
+  }
+  // 計算API群: /api/apps/sun-and-moon/{name}
+  //   各APIは requireProduct(SUN_AND_MOON) を通す（router 内）。アクセスログは記録しない。
+  if (pathname.startsWith("/api/apps/sun-and-moon/")) {
+    const name = parsePathSegment(pathname.slice("/api/apps/sun-and-moon/".length));
+    if (name !== null) {
+      return handleSunAndMoonApi(request, env, ctx, name).then((res) =>
+        res ?? jsonError("NOT_FOUND", "エンドポイントが見つかりません。", 404),
+      );
+    }
   }
 
   // Admin（すべて requireAdmin をハンドラ内で通す）
@@ -217,8 +235,8 @@ function routeAdmin(
 }
 
 export default {
-  fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
-    return withErrorHandling((req) => route(req, env))(request);
+  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return withErrorHandling((req) => route(req, env, ctx))(request);
   },
   /**
    * Cloudflare Cron Trigger（1時間ごと）から呼ばれる定期処理。
