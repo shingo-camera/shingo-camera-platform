@@ -600,3 +600,44 @@ test("[実ファイル] 依存条件は STORE カード限定の常時表示で�
   // 旧・動的 dep-note（同義警告の二重表示源）は廃止
   assert.doesNotMatch(siteJsD, /dep-note/);
 });
+
+/* ============ favicon（shingo_camera LABO 用・Platform共通）の実ファイル検証 ============ */
+import { existsSync as fviconExists } from "node:fs";
+import { readdirSync } from "node:fs";
+
+test("[実ファイル] favicon 資産一式が存在する（ico/svg/16/32/apple-touch）", () => {
+  const base = "public/assets/icons/";
+  for (const n of ["favicon.ico","favicon.svg","favicon-16.png","favicon-32.png","apple-touch-icon.png"]) {
+    assert.equal(fviconExists(base + n), true, n);
+  }
+});
+
+test("[実ファイル] Platform 共通画面（admin/apps 除く）に favicon が挿入されている", () => {
+  function walk(dir) {
+    let out = [];
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = dir + "/" + e.name;
+      if (e.isDirectory()) out = out.concat(walk(p));
+      else if (e.name === "index.html") out.push(p);
+    }
+    return out;
+  }
+  const pages = walk("public").filter((p) => !p.includes("/admin/") && !p.includes("/apps/"));
+  for (const p of pages) {
+    const h = readFileSync(p, "utf8");
+    assert.match(h, /rel="icon" href="\/assets\/icons\/favicon\.ico"/, p);
+    assert.match(h, /apple-touch-icon.*\/assets\/icons\/apple-touch-icon\.png/, p);
+  }
+});
+
+test("[実ファイル] favicon は商品固有アイコンを流用していない（§3）", () => {
+  const links = readFileSync("public/index.html", "utf8").match(/<link[^>]*rel="(icon|apple-touch-icon)"[^>]*>/g) || [];
+  for (const l of links) {
+    assert.doesNotMatch(l, /hanabi|sun-and-moon|google-earth/);
+  }
+});
+
+test("[実ファイル] HOME title と Production URL が維持されている（§4/§5）", () => {
+  assert.match(readFileSync("public/index.html", "utf8"), /<title>shingo_camera LABO<\/title>/);
+  assert.match(readFileSync("wrangler.toml", "utf8"), /APP_BASE_URL = "https:\/\/shingo-camera\.com"/);
+});
