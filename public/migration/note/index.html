@@ -103,7 +103,9 @@
     }
     var token = await getToken();
     if (!token) {
-      setEmpty("状態を確認するにはログインしてください。");
+      // 未ログインでも画面自体は表示する（§14）。常時のログイン案内は出さず、
+      // 移行実行時に LOGIN へ誘導する。移行済み一覧はログイン後に取得される。
+      setEmpty("—");
       return;
     }
     try {
@@ -144,8 +146,8 @@
 
     var token = await getToken();
     if (!token) {
-      resultEl.className = "result err";
-      resultEl.textContent = "ログインが必要です。";
+      // 移行実行にはログインが必要（§14）。LOGIN 成功後この画面へ戻す。
+      window.location.href = "/login/?redirect=" + encodeURIComponent("/migration/note/");
       return;
     }
 

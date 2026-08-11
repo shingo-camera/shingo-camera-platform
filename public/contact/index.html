@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>お問い合わせ — shingo_camera</title>
+  <link rel="stylesheet" href="/assets/site.css" />
+  <script src="/assets/vendor/supabase.js"></script>
+  <script src="/assets/site-config.js"></script>
+  <script src="/assets/site.js" defer></script>
+</head>
+<body data-page="contact">
+  <header id="site-header" class="site-header"></header>
+
+  <main>
+    <div class="doc">
+      <h1>お問い合わせ</h1>
+      <p class="lead">お問い合わせ手段は確定後に掲載します。</p>
+      <!-- 問い合わせ手段（mailto or 外部フォーム）は site-config.js の contact から描画。未確定なら準備中表示。 -->
+      <div id="contact-method"></div>
+    </div>
+  </main>
+
+  <footer id="site-footer" class="site-footer"></footer>
+</body>
+</html>

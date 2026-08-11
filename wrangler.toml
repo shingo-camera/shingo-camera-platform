@@ -42,6 +42,16 @@ keep_vars = true
 [vars]
 APP_ENV = "production"
 
+# APP_BASE_URL: Stripe の success_url / cancel_url を生成する固定オリジン（非秘密）。
+#   request.url.origin を使わない理由: 同一 operation の retry で origin が揺れると
+#   Stripe create パラメータ（idempotency 前提）が変わるため、環境固定値を正本にする。
+#   実値（Production の公開 URL）はこのリポジトリに含めない運用のため、以下のいずれかで設定する:
+#     - Production: 下行のコメントを外し実 URL を記入するか、Dashboard の Variables で APP_BASE_URL を設定
+#                   （keep_vars=true のため Dashboard 設定は deploy で保持される）
+#     - Local     : .dev.vars に APP_BASE_URL=http://localhost:8787 を記入（.dev.vars.example 参照）
+#   例: APP_BASE_URL = "https://platform.example.com"
+# APP_BASE_URL = "https://<本番の公開URL>"
+
 # Workers Static Assets（WORK-003）
 #
 # 責務分担:

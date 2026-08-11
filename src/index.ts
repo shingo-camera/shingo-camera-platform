@@ -27,7 +27,14 @@ import {
   handleAdminWarnings,
   handleAdminWarningUpdate,
 } from "./routes/admin";
-import { handleCheckout, handlePurchaseStatus } from "./routes/purchases";
+import { handleCheckout, handlePurchaseStatus, handleActiveCheckout, handleRecover, handleCancel } from "./routes/purchases";
+import {
+  handleAdminReconcile,
+  handleAdminOrders,
+  handleAdminOrderDetail,
+  handleAdminPaymentEvents,
+} from "./routes/admin_purchases";
+import { handleAdminResetPurchases } from "./routes/admin_test";
 import { handleStripeWebhook } from "./routes/stripe_webhook";
 import { handleNoteApply, handleNoteStatus } from "./routes/migrations";
 import { handleNoteImport, handleNoteList, handleNoteUpdate } from "./routes/admin_note";
@@ -46,10 +53,16 @@ export interface Env {
   SUPABASE_URL?: string;
   SUPABASE_ANON_KEY?: string;
   ADMIN_AUTH_USER_ID?: string;
+  // 公開サイトの固定オリジン（Stripe success_url/cancel_url の生成に使用。
+  // request.url.origin を使うと同一 operation の retry で origin が揺れ、Stripe create
+  // パラメータが変わり得るため、環境固定値を正本とする。例: https://platform.example.com）
+  APP_BASE_URL?: string;
   // Stripe（Cloudflare Secrets / Local は .dev.vars。実値を Git/toml に書かない）
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_PRICE_SUN_AND_MOON?: string;
+  STRIPE_PRICE_HANABI?: string;
+  STRIPE_PRICE_HANABI_GOOGLE_EARTH?: string;
   // Resend（Warning 通知メール用。Cloudflare Secret / Local は .dev.vars。実値を Git/toml に書かない）
   MAIL_API_KEY?: string;
 }
@@ -143,6 +156,17 @@ function route(request: Request, env: Env, ctx: ExecutionContext): Response | Pr
   if (method === "GET" && pathname === "/api/purchases/status") {
     return handlePurchaseStatus(request, env);
   }
+  if (method === "GET" && pathname === "/api/purchases/active-checkout") {
+    return handleActiveCheckout(request, env);
+  }
+  // success recovery（認証必須・他人 Session は 403）
+  if (method === "POST" && pathname === "/api/purchases/recover") {
+    return handleRecover(request, env);
+  }
+  // cancel（認証必須・operationId ベース。sessionId を browser から受けない）
+  if (method === "POST" && pathname === "/api/purchases/cancel") {
+    return handleCancel(request, env);
+  }
   // Stripe Webhook（JWT 不要・署名検証必須）
   if (method === "POST" && pathname === "/api/stripe/webhook") {
     return handleStripeWebhook(request, env);
@@ -214,6 +238,30 @@ function routeAdmin(
       }
       return handleAdminUserProduct(request, env, authUserId, productCode);
     }
+  }
+
+  // 購入救済・注文追跡（WORK-011）
+  if (method === "POST" && pathname === "/api/admin/purchases/reconcile") {
+    return handleAdminReconcile(request, env);
+  }
+  // Local/Test 専用: 購入状態リセット（Production は 404。環境ガードはハンドラ先頭で判定）
+  if (method === "POST" && pathname === "/api/admin/test/reset-purchases") {
+    return handleAdminResetPurchases(request, env);
+  }
+  if (method === "GET" && pathname === "/api/admin/orders") {
+    return handleAdminOrders(request, env);
+  }
+  if (method === "GET" && pathname === "/api/admin/payment-events") {
+    return handleAdminPaymentEvents(request, env);
+  }
+  if (method === "GET" && pathname.startsWith("/api/admin/orders/")) {
+    const raw = pathname.slice("/api/admin/orders/".length);
+    const id = parsePathSegment(raw);
+    const orderId = id !== null ? Number(id) : NaN;
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return jsonError("ORDER_NOT_FOUND", "注文が見つかりません。", 404);
+    }
+    return handleAdminOrderDetail(request, env, orderId);
   }
 
   // note 管理

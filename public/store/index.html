@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Store — shingo_camera</title>
+  <link rel="stylesheet" href="/assets/site.css" />
+  <link rel="stylesheet" href="/assets/dialog.css" />
+  <script src="/assets/vendor/supabase.js"></script>
+  <script src="/assets/site-config.js"></script>
+  <script src="/assets/dialog.js" defer></script>
+  <script src="/assets/site.js" defer></script>
+</head>
+<body data-page="store">
+  <header id="site-header" class="site-header"></header>
+
+  <main>
+    <div class="container">
+      <section class="store-section">
+        <div class="section-head reveal">
+          <p class="kicker">Store</p>
+          <h2>商品を購入する</h2>
+        </div>
+
+        <!-- 販売商品一覧（site.js が描画。既存 Stripe Checkout 導線に接続） -->
+        <div class="store-grid" id="store-products">
+          <p class="launcher-empty">読み込み中…</p>
+        </div>
+
+        <!-- note 購入者向け導線（販売とは別。移行・確認） -->
+        <div class="note-owner reveal">
+          <h3>note で HANABI PLANNER を購入済みの方</h3>
+          <p>note でご購入いただいた HANABI PLANNER をお持ちの場合、こちらから Platform への移行・確認ができます。新規購入ではありません。</p>
+          <a class="btn secondary" href="/migration/note/">note 購入の移行・確認へ</a>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer id="site-footer" class="site-footer"></footer>
+</body>
+</html>

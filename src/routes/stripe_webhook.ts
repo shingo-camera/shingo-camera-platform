@@ -2,57 +2,55 @@
  * Stripe Webhook ルート
  *   POST /api/stripe/webhook  （利用者 JWT 不要、Stripe 署名検証必須）
  *
- * 設計根拠: api/PURCHASE_API.md 3, adr/ADR-007, REVIEW_RULE.md 4
+ * 設計根拠: api/PURCHASE_API.md 3, adr/ADR-007, REVIEW_RULE.md 4,
+ *           ORDER_LIFECYCLE_DESIGN_*（共通 fulfill・expired/refund/dispute）
  *
- * 重要:
+ * 重要（WORK-007 で確定・維持必須）:
  * - raw request body を変更せず使用する（署名検証のため text() は 1 回だけ呼ぶ）。
  * - 署名検証は Stripe 公式 SDK の constructEventAsync + createSubtleCryptoProvider。
- * - checkout.session.completed かつ payment_status=paid の場合のみ権限付与。
- * - 冪等: 同じ Webhook 再送は「処理済み」として 200 を返す。
- * - 権限付与の正本は Webhook のみ（完了画面から付与しない）。
- * - 将来の遅延決済追加時は async_payment_succeeded で成立させる構成へ拡張可能。
+ * - 権限付与の正本は Webhook（主経路）。付与ロジックは共通 fulfill に集約。
+ *
+ * WORK-011 注文ライフサイクル:
+ * - checkout.session.completed → fulfillCheckoutSession(webhook)（Session ID 冪等）。
+ * - checkout.session.expired   → 対応 attempt を EXPIRED / lock 解放。
+ * - refund 関連 / dispute 関連  → T_PAYMENT_EVENT へ記録（event.id 冪等・自動剥奪しない）。
  */
 
 import Stripe from "stripe";
 import { getStripe, getCryptoProvider, StripeConfigError } from "../shared/stripe";
-import { fulfillCheckout, resolvePriceId } from "../shared/purchase";
+import { PriceConfigError } from "../shared/purchase";
 import { AppError } from "../shared/errors";
-import { nowIso } from "../shared/datetime";
+import { getDb } from "../shared/db";
 import { jsonOk, jsonError } from "../shared/response";
+import {
+  fulfillCheckoutSession,
+  retrieveAndValidateCheckoutSession,
+  epochToJstIso,
+  verifyLineItemsAndResolve,
+} from "../shared/stripe_fulfill";
+import {
+  expireAttempt,
+  recordPaymentEvent,
+  PAYMENT_EVENT_TYPE,
+} from "../shared/checkout_attempt";
 import type { Env } from "../index";
-
-/** Stripe の epoch 秒を JST ISO 文字列へ変換 */
-function epochToJstIso(epochSec: number): string {
-  const JST_OFFSET_MIN = 9 * 60;
-  const jst = new Date(epochSec * 1000 + JST_OFFSET_MIN * 60 * 1000);
-  const p2 = (n: number) => String(n).padStart(2, "0");
-  const y = jst.getUTCFullYear();
-  const mo = p2(jst.getUTCMonth() + 1);
-  const d = p2(jst.getUTCDate());
-  const h = p2(jst.getUTCHours());
-  const mi = p2(jst.getUTCMinutes());
-  const s = p2(jst.getUTCSeconds());
-  return `${y}-${mo}-${d}T${h}:${mi}:${s}+09:00`;
-}
 
 /**
  * POST /api/stripe/webhook
  */
 export async function handleStripeWebhook(request: Request, env: Env): Promise<Response> {
-  // Webhook Secret 未設定は内部設定エラー（利用者へ詳細を返さない）
   const webhookSecret = env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) {
     console.error("[webhook] STRIPE_WEBHOOK_SECRET is not configured");
     return jsonError("INTERNAL_ERROR", "処理中にエラーが発生しました。", 500);
   }
 
-  // 署名ヘッダー
   const sig = request.headers.get("stripe-signature");
   if (!sig) {
     return jsonError("INVALID_SIGNATURE", "署名がありません。", 400);
   }
 
-  // raw body は 1 回だけ取得（body は一度しか読めない）。署名検証に未加工の文字列を使う。
+  // raw body は 1 回だけ取得（署名検証に未加工の文字列を使う）。
   const rawBody = await request.text();
 
   let stripe: Stripe;
@@ -66,7 +64,6 @@ export async function handleStripeWebhook(request: Request, env: Env): Promise<R
     throw err;
   }
 
-  // 署名検証（公式 SDK・Web Crypto）。tolerance 等は SDK 標準に従う。
   let event: Stripe.Event;
   try {
     event = await stripe.webhooks.constructEventAsync(
@@ -76,174 +73,162 @@ export async function handleStripeWebhook(request: Request, env: Env): Promise<R
       undefined,
       getCryptoProvider(),
     );
-  } catch (err) {
-    // 署名不正は 400（内部詳細は返さない）
+  } catch {
     console.error("[webhook] signature verification failed");
     return jsonError("INVALID_SIGNATURE", "署名の検証に失敗しました。", 400);
   }
 
-  // イベント種別で分岐。初期対象は購入成立に必要な範囲。
   try {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        return await handleSessionCompleted(env, stripe, session);
+        const r = await fulfillCheckoutSession(env, session.id, "webhook");
+        return jsonOk({ received: true, handled: true, outcome: r.outcome });
       }
-      // 将来の遅延決済のための拡張ポイント（現状は即時決済のみ）。
-      // completed で payment_status=paid を確認するため、ここでは受理して 200 を返す。
+      case "checkout.session.expired": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        await handleSessionExpired(env, session.id);
+        return jsonOk({ received: true, handled: true });
+      }
+      // refund 関連（2024-10-28 Acacia 以降は refund.* が全 refund で発火）
+      case "charge.refunded":
+      case "refund.created":
+      case "refund.updated":
+      case "refund.failed": {
+        await handleRefundEvent(env, event);
+        return jsonOk({ received: true, handled: true });
+      }
+      // dispute 関連
+      case "charge.dispute.created":
+      case "charge.dispute.updated":
+      case "charge.dispute.closed": {
+        await handleDisputeEvent(env, event);
+        return jsonOk({ received: true, handled: true });
+      }
+      // 将来の遅延決済（現状は即時決済のみ）。
       case "checkout.session.async_payment_succeeded":
       case "checkout.session.async_payment_failed":
-      case "checkout.session.expired":
         return jsonOk({ received: true, handled: false });
       default:
-        // 対象外イベントは受理のみ（200）。二重送信・想定外でもエラーにしない。
         return jsonOk({ received: true, handled: false });
     }
   } catch (err) {
     if (err instanceof AppError) {
-      // 不整合（USER_NOT_FOUND / PRODUCT_NOT_FOUND 等）は内部エラーとして記録し、
-      // 権限付与しない。Stripe には 400 を返し、再送では冪等に扱う。
       console.error("[webhook] fulfillment inconsistency:", err.code, err.message);
       return jsonError(err.code, "処理できませんでした。", err.status);
+    }
+    if (err instanceof PriceConfigError) {
+      console.error("[webhook] price config error:", err.message);
+      return jsonError("INTERNAL_ERROR", "処理できませんでした。", 500);
     }
     throw err;
   }
 }
 
 /**
- * checkout.session.completed の処理。
- * payment_status=paid の場合のみ権限付与。
+ * checkout.session.expired: 対応 attempt を EXPIRED にし lock を解放する。
+ * attempt が無い（既に処理済み・別経路）場合は何もしない（冪等）。
  */
-async function handleSessionCompleted(
+async function handleSessionExpired(env: Env, sessionId: string): Promise<void> {
+  const db = getDb(env);
+  const row = await db
+    .prepare("SELECT ATTEMPT_ID, STATUS FROM T_CHECKOUT_ATTEMPT WHERE STRIPE_SESSION_ID = ?")
+    .bind(sessionId)
+    .first<{ ATTEMPT_ID: number; STATUS: number }>();
+  if (!row) return;
+  // PAID 済みは触らない（保護）。それ以外は EXPIRED + lock 解放。
+  if (row.STATUS === 2) return;
+  await expireAttempt(env, row.ATTEMPT_ID);
+}
+
+/** payment_intent（string|object|null）から ID を取り出す。 */
+function extractPaymentIntentId(pi: unknown): string | null {
+  if (typeof pi === "string") return pi;
+  if (pi && typeof pi === "object" && "id" in pi) {
+    const id = (pi as { id?: unknown }).id;
+    return typeof id === "string" ? id : null;
+  }
+  return null;
+}
+
+/** PaymentIntent ID から注文を逆引き（無ければ null）。 */
+async function lookupOrderByPaymentIntent(
   env: Env,
-  stripe: Stripe,
-  session: Stripe.Checkout.Session,
-): Promise<Response> {
-  // payment_status=paid のみ成立（unpaid 等は付与しない）
-  if (session.payment_status !== "paid") {
-    // 未払い完了（遅延決済など）は現状では付与しない。受理のみ。
-    return jsonOk({ received: true, handled: false });
-  }
-
-  // metadata 検証
-  const authUserId = session.metadata?.auth_user_id;
-  const productCode = session.metadata?.product_code;
-  if (!authUserId || !productCode) {
-    console.error("[webhook] metadata missing");
-    return jsonError("METADATA_MISSING", "処理できませんでした。", 400);
-  }
-
-  // 期待 Price ID をサーバー側 env から解決（未設定は内部不整合）
-  const expectedPriceId = resolvePriceId(env, productCode);
-  if (!expectedPriceId) {
-    // Price 未設定・未対応商品。権限付与せず内部不整合として記録（詳細は返さない）。
-    console.error("[webhook] price id not configured for product_code:", productCode);
-    return jsonError("INTERNAL_ERROR", "処理できませんでした。", 500);
-  }
-
-  // 金額・Price 照合のため、署名検証済み Session を Stripe から再取得し line_items を展開する。
-  // クライアント値（payload の amount_total 等）を信用せず、Stripe 側の確定値で照合する。
-  // 1 Session につき 1 回のみの API 呼び出し。
-  // line_items.data[].price は Line Item 内に Price オブジェクトとして含まれるため、
-  // line_items のみを expand する（line_items.data.price の追加 expand は不要）。
-  let full: Stripe.Checkout.Session;
-  try {
-    full = await stripe.checkout.sessions.retrieve(session.id, {
-      expand: ["line_items"],
-    });
-  } catch (err) {
-    console.error("[webhook] failed to retrieve session for price verification");
-    return jsonError("INTERNAL_ERROR", "処理できませんでした。", 500);
-  }
-
-  // 照合結果が不一致なら権限付与せず内部不整合として記録（Secret/内部 Price 情報は返さない）
-  const mismatch = verifyAmountAndPrice(full, expectedPriceId);
-  if (mismatch) {
-    console.error("[webhook] amount/price mismatch:", mismatch);
-    return jsonError("INTERNAL_ERROR", "処理できませんでした。", 500);
-  }
-
-  // 照合済みの確定値を使用（Stripe 側の値。クライアント値は使わない）
-  const sessionId = full.id;
-  const amountTotal = typeof full.amount_total === "number" ? full.amount_total : 0;
-  const purchaseDate =
-    typeof full.created === "number" ? epochToJstIso(full.created) : nowIso();
-
-  const result = await fulfillCheckout(env, {
-    authUserId,
-    productCode,
-    sessionId,
-    amountTotal,
-    purchaseDate,
-  });
-
-  return jsonOk({ received: true, handled: true, alreadyProcessed: result.alreadyProcessed });
+  paymentIntentId: string | null,
+): Promise<{ ORDER_ID: number; AUTH_USER_ID: string } | null> {
+  if (!paymentIntentId) return null;
+  const db = getDb(env);
+  const row = await db
+    .prepare(
+      "SELECT ORDER_ID, AUTH_USER_ID FROM T_ORDER WHERE PAYMENT_INTENT_ID = ? AND DEL_FLG = 0",
+    )
+    .bind(paymentIntentId)
+    .first<{ ORDER_ID: number; AUTH_USER_ID: string }>();
+  return row ?? null;
 }
 
 /**
- * 金額・Price・通貨の照合。不一致があれば内部ログ用の理由文字列を返す（利用者には返さない）。
- * 一致すれば null。
- *
- * WORK-007 初期仕様（割引・Stripe Tax・複数量販売は使わない）として固定:
- * - line_items がちょうど 1 件（買い切り 1 商品）
- * - line_items[0].quantity が厳密に 1（null / undefined / 1 以外は不整合）
- * - その price.id が期待 Price ID と一致
- * - price.currency が jpy かつ session.currency が jpy
- * - price.unit_amount が null でない
- * - session.amount_total が price.unit_amount と一致（quantity=1 のため乗算不要）
- * 将来、割引・Tax・複数量販売を導入する場合は別途仕様変更する。
- *
- * @param session line_items を expand 済みの Checkout Session
- * @param expectedPriceId サーバー側の期待 Price ID
- * @returns 不一致理由（内部ログ用）／一致なら null
+ * refund 関連イベントを T_PAYMENT_EVENT へ記録する（event.id 冪等・自動剥奪しない）。
+ * Charge/Refund の payment_intent から注文を逆引きする。
  */
-function verifyAmountAndPrice(session: Stripe.Checkout.Session, expectedPriceId: string): string | null {
-  const items = session.line_items?.data ?? [];
-  if (items.length !== 1) {
-    return `line_items count is ${items.length}, expected 1`;
-  }
-  const item = items[0];
+async function handleRefundEvent(env: Env, event: Stripe.Event): Promise<void> {
+  const obj = event.data.object as unknown as Record<string, unknown>;
+  const paymentIntentId = extractPaymentIntentId(obj.payment_intent);
+  const order = await lookupOrderByPaymentIntent(env, paymentIntentId);
+  const objId = typeof obj.id === "string" ? obj.id : null;
+  const amount =
+    typeof obj.amount === "number"
+      ? obj.amount
+      : typeof obj.amount_refunded === "number"
+        ? obj.amount_refunded
+        : null;
+  const status = typeof obj.status === "string" ? obj.status : null;
+  const reason = typeof obj.reason === "string" ? obj.reason : null;
+  await recordPaymentEvent(env, {
+    eventType: PAYMENT_EVENT_TYPE.REFUND,
+    authUserId: order?.AUTH_USER_ID ?? null,
+    orderId: order?.ORDER_ID ?? null,
+    paymentIntentId,
+    stripeObjectId: objId,
+    stripeEventId: event.id,
+    stripeRequestId: event.request?.id ?? null,
+    status,
+    amount,
+    detail: `${event.type}${reason ? ` reason=${reason}` : ""}`,
+  });
+}
 
-  // quantity は厳密に 1（fallback しない。null/undefined/1 以外は不整合）
-  if (item.quantity !== 1) {
-    return `quantity is ${item.quantity}, expected exactly 1`;
-  }
-
-  const price = item.price;
-  if (!price || typeof price !== "object") {
-    return "line item price is missing";
-  }
-
-  // Price ID 一致
-  if (price.id !== expectedPriceId) {
-    return "price id mismatch";
-  }
-
-  // 通貨 JPY 一致（Price 側とセッション側の両方）
-  if (price.currency !== "jpy") {
-    return `price currency is ${price.currency}, expected jpy`;
-  }
-  if (session.currency !== "jpy") {
-    return `session currency is ${session.currency}, expected jpy`;
-  }
-
-  // 期待金額（quantity=1 のため unit_amount と amount_total の一致）
-  if (typeof price.unit_amount !== "number") {
-    return "price unit_amount is null";
-  }
-  if (session.amount_total !== price.unit_amount) {
-    return `amount_total ${session.amount_total} != unit_amount ${price.unit_amount}`;
-  }
-
-  return null;
+/**
+ * dispute 関連イベントを T_PAYMENT_EVENT へ記録する（event.id 冪等・自動剥奪しない）。
+ */
+async function handleDisputeEvent(env: Env, event: Stripe.Event): Promise<void> {
+  const obj = event.data.object as unknown as Record<string, unknown>;
+  const paymentIntentId = extractPaymentIntentId(obj.payment_intent);
+  const order = await lookupOrderByPaymentIntent(env, paymentIntentId);
+  const objId = typeof obj.id === "string" ? obj.id : null;
+  const amount = typeof obj.amount === "number" ? obj.amount : null;
+  const status = typeof obj.status === "string" ? obj.status : null;
+  const reason = typeof obj.reason === "string" ? obj.reason : null;
+  await recordPaymentEvent(env, {
+    eventType: PAYMENT_EVENT_TYPE.DISPUTE,
+    authUserId: order?.AUTH_USER_ID ?? null,
+    orderId: order?.ORDER_ID ?? null,
+    paymentIntentId,
+    stripeObjectId: objId,
+    stripeEventId: event.id,
+    stripeRequestId: event.request?.id ?? null,
+    status,
+    amount,
+    detail: `${event.type}${reason ? ` reason=${reason}` : ""}`,
+  });
 }
 
 /**
  * テスト用エクスポート（本番コードからは使用しない）。
- * 金額・Price 照合ロジックを実コードのまま検証するために公開する。
+ * 検証ロジックは stripe_fulfill.ts の共通版を参照する。
  */
 export const __testonly = {
-  handleSessionCompleted,
-  verifyAmountAndPrice,
+  verifyLineItemsAndResolve,
+  retrieveAndValidateCheckoutSession,
   epochToJstIso,
 };

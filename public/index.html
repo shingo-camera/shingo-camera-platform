@@ -4,20 +4,321 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex" />
-  <title>shingo-camera Platform</title>
-  <link rel="stylesheet" href="/assets/common.css" />
+  <title>shingo_camera — 撮影計画プランナー</title>
+  <link rel="stylesheet" href="/assets/site.css" />
+  <script src="/assets/vendor/supabase.js"></script>
+  <script src="/assets/site-config.js"></script>
+  <script src="/assets/site.js" defer></script>
 </head>
 <body data-page="index">
-  <div class="wrap">
-    <div class="card">
-      <p class="brand">shingo-camera Platform</p>
-      <h1>Planner シリーズ</h1>
-      <p class="hint">SUN AND MOON PLANNER / HANABI PLANNER の共通アカウント基盤。</p>
-      <div class="links" style="margin-top:24px;">
-        <a href="/login/">ログイン</a>
-        <a href="/signup/">新規登録</a>
+  <header id="site-header" class="site-header"></header>
+
+  <main>
+    <!-- Hero: 幾何学的世界観(SVG) + テキスト。初回数秒だけイントロ演出 -->
+    <section class="hero">
+      <svg class="hero-scene" viewBox="0 88 1440 512" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+        <defs>
+          <radialGradient id="hSunGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="rgba(201,162,75,0.3)"/><stop offset="100%" stop-color="rgba(201,162,75,0)"/>
+          </radialGradient>
+          <radialGradient id="hFwGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="rgba(211,112,58,0.4)"/><stop offset="100%" stop-color="rgba(211,112,58,0)"/>
+          </radialGradient>
+          <!-- 日没後の残照（山際のアンバー帯） -->
+          <linearGradient id="hAfterglow" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="rgba(214,140,80,0)"/>
+            <stop offset="55%" stop-color="rgba(214,140,80,0.26)"/>
+            <stop offset="100%" stop-color="rgba(170,90,60,0)"/>
+          </linearGradient>
+          <radialGradient id="hCityGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="rgba(226,150,86,0.20)"/><stop offset="100%" stop-color="rgba(226,150,86,0)"/>
+          </radialGradient>
+          <!-- 横端フェード（meet時にSVG端で地上要素が唐突に切れないように） -->
+          <linearGradient id="hFadeX" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#fff" stop-opacity="0"/>
+            <stop offset="7%" stop-color="#fff" stop-opacity="1"/>
+            <stop offset="93%" stop-color="#fff" stop-opacity="1"/>
+            <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+          </linearGradient>
+          <mask id="hEdgeFade"><rect x="0" y="0" width="1440" height="600" fill="url(#hFadeX)"/></mask>
+          <!-- 軌道1ソース: 表示にもmpathにも同一IDを使用 -->
+          <!-- 回転は transform ではなく arc の x-axis-rotation で d に内包する。
+               mpath は参照先 path の transform を無視するため、transform 方式だと
+               表示軌道(回転あり)と移動軌道(回転なし)がずれる。d 内包なら完全一致。 -->
+          <path id="hOrbitOuter" d="M 857.43 161.97 A 350 130 -10 1 1 857.42 161.97 Z"/>
+          <path id="hOrbitInner" d="M 865.24 206.29 A 235 85 -10 1 1 865.23 206.29 Z"/>
+        </defs>
+
+        <!-- 空・水面の面はCSS背景（.hero）が描画。SVGはシーン要素のみ -->
+
+        <!-- 星 -->
+        <g class="h-stars" fill="#ffffff" fill-opacity="0.45">
+          <circle cx="180" cy="108" r="1"/><circle cx="320" cy="118" r="0.8"/><circle cx="1200" cy="116" r="1"/>
+          <circle cx="1130" cy="104" r="0.8"/><circle cx="240" cy="150" r="0.8"/><circle cx="1320" cy="130" r="1"/>
+          <circle cx="520" cy="112" r="0.8"/><circle cx="960" cy="105" r="0.8"/>
+        </g>
+
+        <!-- 軌道(1ソース: useで表示。同じpathを太陽/月のmpathが参照) -->
+        <use class="h-orbit o2" href="#hOrbitInner" fill="none" stroke="#c9a24b" stroke-opacity="0.16" stroke-width="1" style="--dash:1100"/>
+        <use class="h-orbit o1" href="#hOrbitOuter" fill="none" stroke="#c9a24b" stroke-opacity="0.3" stroke-width="1" style="--dash:1650"/>
+
+        <!-- ===== 地上部（横端フェード付き） ===== -->
+        <g mask="url(#hEdgeFade)">
+          <!-- 山際の残照（アンバー帯） -->
+          <rect class="h-mountain" x="0" y="392" width="1440" height="82" fill="url(#hAfterglow)"/>
+          <!-- 最遠景の山 -->
+          <path class="h-mountain" d="M0,440 L180,410 L360,434 L540,404 L720,432 L900,406 L1080,430 L1260,408 L1440,434 L1440,470 L0,470 Z" fill="#101c30" fill-opacity="0.6" stroke="#c9a24b" stroke-opacity="0.12" stroke-width="1"/>
+          <!-- 中景の山(三角ワイヤーフレーム) -->
+          <g class="h-mountain2" stroke="#c9a24b" stroke-opacity="0.2" stroke-width="1" fill="#0e1a2c" fill-opacity="0.7">
+            <path d="M0,458 L120,430 L260,456 L380,428 L520,458 L640,434 L520,458 Z"/>
+            <path d="M520,458 L640,434 L780,458 L900,436 L1040,460 L1160,438 L1300,460 L1440,440 L1440,470 L0,470 L0,458 Z"/>
+          </g>
+          <g class="h-mountain2" stroke="#c9a24b" stroke-opacity="0.14" stroke-width="0.8" fill="none">
+            <path d="M120,430 L200,462 M260,456 L320,434 M380,428 L460,460 M640,434 L700,462 M900,436 L960,460 M1160,438 L1220,462"/>
+          </g>
+          <!-- 都市の残照グロー -->
+          <ellipse class="h-city" cx="720" cy="468" rx="270" ry="56" fill="url(#hCityGlow)"/>
+        </g>
+
+        <!-- 中央の街/ビル群 -->
+        <g class="h-city" fill="#0f1c33" stroke="#c9a24b" stroke-opacity="0.35" stroke-width="1">
+          <rect x="560" y="446" width="16" height="34"/><rect x="580" y="430" width="22" height="50"/>
+          <rect x="606" y="452" width="14" height="28"/><rect x="624" y="416" width="12" height="64"/>
+          <rect x="640" y="438" width="20" height="42"/><rect x="664" y="424" width="14" height="56"/>
+          <rect x="682" y="406" width="16" height="74"/><rect x="702" y="434" width="18" height="46"/>
+          <rect x="724" y="420" width="12" height="60"/><rect x="740" y="444" width="20" height="36"/>
+          <rect x="764" y="428" width="14" height="52"/><rect x="782" y="412" width="18" height="68"/>
+          <rect x="804" y="440" width="16" height="40"/><rect x="824" y="424" width="12" height="56"/>
+          <rect x="840" y="448" width="20" height="32"/><rect x="864" y="434" width="14" height="46"/>
+        </g>
+        <g class="h-city-lights" fill="#e7c877" fill-opacity="0.7">
+          <circle cx="590" cy="444" r="0.9"/><circle cx="630" cy="434" r="0.9"/><circle cx="670" cy="444" r="0.9"/>
+          <circle cx="688" cy="424" r="0.9"/><circle cx="730" cy="438" r="0.9"/><circle cx="788" cy="430" r="0.9"/>
+          <circle cx="830" cy="446" r="0.9"/><circle cx="712" cy="454" r="0.9"/>
+        </g>
+
+        <!-- 地平線・水面のさざなみ（横端フェード付き） -->
+        <g mask="url(#hEdgeFade)">
+          <line x1="0" y1="480" x2="1440" y2="480" stroke="#4a6a95" stroke-opacity="0.55" stroke-width="1.2"/>
+          <g class="h-water-lines" stroke="#4a6a95" stroke-opacity="0.08" stroke-width="1">
+            <line x1="0" y1="500" x2="1440" y2="500"/><line x1="0" y1="525" x2="1440" y2="525"/><line x1="0" y1="560" x2="1440" y2="560"/>
+          </g>
+        </g>
+        <!-- 縦リフレクション（街灯ゴールド・残照アンバー・花火オレンジ） -->
+        <g class="h-reflection" stroke-width="1.5">
+          <line x1="688" y1="482" x2="688" y2="555" stroke="#e7c877" stroke-opacity="0.14"/>
+          <line x1="730" y1="482" x2="730" y2="535" stroke="#e7c877" stroke-opacity="0.1"/>
+          <line x1="788" y1="482" x2="788" y2="545" stroke="#e7c877" stroke-opacity="0.1"/>
+          <line x1="630" y1="482" x2="630" y2="530" stroke="#e7c877" stroke-opacity="0.09"/>
+          <line x1="660" y1="482" x2="660" y2="540" stroke="#d68c50" stroke-opacity="0.1"/>
+          <line x1="760" y1="482" x2="760" y2="548" stroke="#d68c50" stroke-opacity="0.09"/>
+        </g>
+        <line class="h-reflection-fw" x1="820" y1="482" x2="820" y2="580" stroke="#d3703a" stroke-opacity="0.12" stroke-width="2"/>
+
+        <!-- ===== 花火(中央の街から打ち上げ→開花) ===== -->
+        <line class="h-fuse" x1="820" y1="480" x2="820" y2="315" stroke="#d3703a" stroke-opacity="0.4" stroke-width="1.2" stroke-dasharray="4 5" stroke-linecap="round"/>
+        <g transform="translate(820,300)">
+          <g class="h-burst">
+            <circle r="50" fill="url(#hFwGlow)"/>
+            <g stroke-linecap="round">
+              <g stroke="#d3703a" stroke-width="1.5">
+                <line x1="0" y1="0" x2="0" y2="-60"/><line x1="0" y1="0" x2="0" y2="60"/>
+                <line x1="0" y1="0" x2="-60" y2="0"/><line x1="0" y1="0" x2="60" y2="0"/>
+                <line x1="0" y1="0" x2="-42" y2="-42"/><line x1="0" y1="0" x2="42" y2="-42"/>
+                <line x1="0" y1="0" x2="-42" y2="42"/><line x1="0" y1="0" x2="42" y2="42"/>
+              </g>
+              <g stroke="#e7c877" stroke-width="1" stroke-opacity="0.7">
+                <line x1="0" y1="0" x2="-23" y2="-55"/><line x1="0" y1="0" x2="23" y2="-55"/>
+                <line x1="0" y1="0" x2="-55" y2="-23"/><line x1="0" y1="0" x2="55" y2="-23"/>
+                <line x1="0" y1="0" x2="-23" y2="55"/><line x1="0" y1="0" x2="23" y2="55"/>
+                <line x1="0" y1="0" x2="-55" y2="23"/><line x1="0" y1="0" x2="55" y2="23"/>
+              </g>
+            </g>
+            <g fill="#ffcf9a">
+              <circle cx="0" cy="-60" r="2"/><circle cx="0" cy="60" r="2"/><circle cx="-60" cy="0" r="2"/><circle cx="60" cy="0" r="2"/>
+              <circle cx="-42" cy="-42" r="1.8"/><circle cx="42" cy="-42" r="1.8"/><circle cx="-42" cy="42" r="1.8"/><circle cx="42" cy="42" r="1.8"/>
+            </g>
+            <circle r="3" fill="#fff" fill-opacity="0.9"/>
+          </g>
+        </g>
+
+        <!-- ===== 太陽: motion用g(原点=軌道上の点) → 描画用g(原点中心) ===== -->
+        <g class="h-sun">
+          <g class="h-sun-art">
+            <circle r="34" fill="url(#hSunGlow)"/>
+            <circle r="12" fill="none" stroke="#e7c877" stroke-width="1.4"/>
+            <!-- 放射線: 長/短を交互に配置（SUN AND MOON アイコンの幾何学に準拠） -->
+            <g stroke="#e7c877" stroke-width="1.1" stroke-linecap="round">
+              <line x1="0.0" y1="-17.0" x2="0.0" y2="-30.0"/>
+              <line x1="6.5" y1="-15.7" x2="8.8" y2="-21.2"/>
+              <line x1="12.0" y1="-12.0" x2="21.2" y2="-21.2"/>
+              <line x1="15.7" y1="-6.5" x2="21.2" y2="-8.8"/>
+              <line x1="17.0" y1="-0.0" x2="30.0" y2="-0.0"/>
+              <line x1="15.7" y1="6.5" x2="21.2" y2="8.8"/>
+              <line x1="12.0" y1="12.0" x2="21.2" y2="21.2"/>
+              <line x1="6.5" y1="15.7" x2="8.8" y2="21.2"/>
+              <line x1="0.0" y1="17.0" x2="0.0" y2="30.0"/>
+              <line x1="-6.5" y1="15.7" x2="-8.8" y2="21.2"/>
+              <line x1="-12.0" y1="12.0" x2="-21.2" y2="21.2"/>
+              <line x1="-15.7" y1="6.5" x2="-21.2" y2="8.8"/>
+              <line x1="-17.0" y1="0.0" x2="-30.0" y2="0.0"/>
+              <line x1="-15.7" y1="-6.5" x2="-21.2" y2="-8.8"/>
+              <line x1="-12.0" y1="-12.0" x2="-21.2" y2="-21.2"/>
+              <line x1="-6.5" y1="-15.7" x2="-8.8" y2="-21.2"/>
+            </g>
+          </g>
+          <animateMotion class="h-sun-motion" dur="1.3s" begin="indefinite" fill="freeze" keyPoints="0.80;0.90" keyTimes="0;1" calcMode="spline" keySplines="0.22 0.61 0.36 1">
+            <mpath href="#hOrbitOuter"/>
+          </animateMotion>
+        </g>
+
+        <!-- ===== 月: motion用g → 描画用g(視覚中心を原点へ補正・左欠け右明るい固定) ===== -->
+        <g class="h-moon">
+          <g class="h-moon-art" transform="translate(-10.5,0) rotate(30)">
+            <path d="M 0 -19 A 19 19 0 0 1 0 19 A 26 26 0 0 0 0 -19 Z" fill="#cbd3e2" fill-opacity="0.95"/>
+          </g>
+          <animateMotion class="h-moon-motion" dur="1.3s" begin="indefinite" fill="freeze" keyPoints="0.26;0.15" keyTimes="0;1" calcMode="spline" keySplines="0.22 0.61 0.36 1">
+            <mpath href="#hOrbitInner"/>
+          </animateMotion>
+        </g>
+      </svg>
+
+      <div class="container">
+        <div class="h-text">
+          <p class="eyebrow">Planning Tools</p>
+          <h1 id="hero-copy">撮影計画を、<br />もっと正確に。</h1>
+          <p id="hero-sub" class="hero-sub">太陽・月・地形・被写体を組み合わせ、現地で迷わない計画を。</p>
+        </div>
       </div>
-    </div>
-  </div>
+    </section>
+
+    <!-- TOOL / STORE / PHILOSOPHY: 同一外枠パネルの縦スタック（3軸） -->
+    <section class="top-stack">
+      <div class="container">
+        <!-- TOOL: 見出しごと1つの外枠に収め、内側に枠付きアプリカード2枚 -->
+        <div class="panel tool-panel hoverable reveal">
+          <div class="panel-head">
+            <p class="kicker">Tool</p>
+            <h2>撮影のための、計画ツール。</h2>
+          </div>
+          <div class="tool-inner tool-inner-3">
+            <div class="tool-col-left">
+              <div class="product-card theme-sam">
+                <div class="pc-body">
+                  <div class="pc-icon" data-app-icon="SUN_AND_MOON"></div>
+                  <div>
+                    <h3>SUN AND MOON PLANNER</h3>
+                    <p data-product-desc="SUN_AND_MOON"></p>
+                  </div>
+                </div>
+                <div class="pc-cta pc-links" data-product-links="SUN_AND_MOON"></div>
+              </div>
+            </div>
+            <div class="tool-col-right">
+              <div class="product-card theme-hanabi">
+                <div class="pc-body">
+                  <div class="pc-icon" data-app-icon="HANABI"></div>
+                  <div>
+                    <h3>HANABI PLANNER <span class="badge">Platform版準備中</span></h3>
+                    <p data-product-desc="HANABI"></p>
+                  </div>
+                </div>
+                <div class="pc-cta pc-links" data-product-links="HANABI"></div>
+              </div>
+              <div class="product-card theme-hanabi theme-earth">
+                <div class="pc-body">
+                  <div class="pc-icon" data-app-icon="HANABI_GOOGLE_EARTH"></div>
+                  <div>
+                    <h3>HANABI PLANNER<br>Google Earth 連携</h3>
+                    <p data-product-desc="HANABI_GOOGLE_EARTH"></p>
+                  </div>
+                </div>
+                <div class="pc-cta pc-links" data-product-links="HANABI_GOOGLE_EARTH"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STORE: 通常はニュートラル枠。hover時のみゴールド -->
+        <div class="panel store-panel hoverable reveal">
+          <!-- バッグモチーフは見出し整列に影響しない右上の装飾として絶対配置 -->
+          <div class="store-entry-motif" aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.3">
+              <path d="M14 22 L18 14 L46 14 L50 22"/>
+              <rect x="12" y="22" width="40" height="32" rx="2"/>
+              <path d="M24 22 v6 a8 8 0 0 0 16 0 v-6"/>
+              <circle cx="32" cy="40" r="6"/>
+            </svg>
+          </div>
+          <div class="store-entry-text">
+            <div class="panel-head">
+              <p class="kicker">Store</p>
+              <h2>ツールを購入する。</h2>
+            </div>
+            <p class="store-entry-lead">ツールの購入はこちら。noteでご購入済の方もこちらから権限を復元ください。</p>
+          </div>
+          <a class="store-entry-btn" href="/store/">STORE を見る <span class="arrow">→</span></a>
+        </div>
+
+        <!-- PHILOSOPHY: 左右分割（同一パネル・hover時のみ薄いゴールド） -->
+        <div class="panel phil-panel hoverable reveal">
+          <div class="phil-left">
+            <div class="panel-head">
+              <p class="kicker">Philosophy</p>
+              <h2>計画が、作品を変える。</h2>
+            </div>
+            <p class="phil-lead">撮影は、その場の一瞬で決まる。だからこそ、事前の計画が作品の質を左右します。太陽と月、地形や建造物。読み切れる要素は、読み切っておく。</p>
+            <p class="phil-close">それが、PLANNERシリーズの考え方です。</p>
+            <svg class="phil-terrain" viewBox="0 0 420 90" fill="none" aria-hidden="true">
+              <polyline points="0,70 60,52 120,64 180,44 240,60 300,40 360,58 420,46" stroke="#c9a24b" stroke-opacity="0.16" stroke-width="1"/>
+              <polyline points="0,80 70,72 140,82 210,70 280,80 350,70 420,78" stroke="#c9a24b" stroke-opacity="0.1" stroke-width="1"/>
+              <path d="M60,52 L90,80 M180,44 L210,80 M300,40 L330,80" stroke="#c9a24b" stroke-opacity="0.09" stroke-width="0.8"/>
+            </svg>
+          </div>
+          <div class="phil-divider" aria-hidden="true"></div>
+          <div class="phil-right">
+            <div class="phil-value reveal d1">
+              <div class="p-icon">
+                <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.4">
+                  <circle cx="20" cy="20" r="13"/><circle cx="20" cy="20" r="4"/>
+                  <line x1="20" y1="3" x2="20" y2="9"/><line x1="20" y1="31" x2="20" y2="37"/>
+                  <line x1="3" y1="20" x2="9" y2="20"/><line x1="31" y1="20" x2="37" y2="20"/>
+                </svg>
+              </div>
+              <div>
+                <h3>正確な計画で、現地で迷わない</h3>
+                <p>太陽・月・地形・被写体を統合して可視化する。</p>
+              </div>
+            </div>
+            <div class="phil-value reveal d2">
+              <div class="p-icon">
+                <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.4">
+                  <circle cx="20" cy="20" r="15"/><path d="M20 11 L20 20 L27 24"/>
+                </svg>
+              </div>
+              <div>
+                <h3>ロケハンの時間を、創造の時間に</h3>
+                <p>移動と試行錯誤を減らし、集中できる環境を。</p>
+              </div>
+            </div>
+            <div class="phil-value reveal d3">
+              <div class="p-icon">
+                <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.4">
+                  <rect x="6" y="12" width="28" height="20" rx="3"/><circle cx="20" cy="22" r="6"/>
+                  <path d="M14 12 L17 8 L23 8 L26 12"/>
+                </svg>
+              </div>
+              <div>
+                <h3>経験と感性を、最大限に活かす</h3>
+                <p>計算はツール。作品の主役は、あなたの視点。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer" class="site-footer"></footer>
 </body>
 </html>

@@ -77,3 +77,14 @@ a.btn-link:hover { text-decoration: underline; }
 form.inline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 label.field { display: flex; flex-direction: column; font-size: 12px; gap: 2px; }
 label.field input, label.field select { padding: 5px 7px; border: 1px solid #cbd2d9; border-radius: 3px; }
+
+/* ==== Platform 共通ヘッダー組込み（WORK-011 §8）==== */
+/* site.css の装飾グラデは管理画面では無効化（既存 admin UI の見た目を維持） */
+body::before { content: none; }
+/* [共通 site-header] → [admin-header] の 2 階層。admin 固有ナビは従来どおり下段。 */
+.site-header { position: sticky; top: 0; }
+.admin-header { margin-top: 0; }
+/* site.css の a{color:白} が admin 本文（ライト背景）へ波及しないよう本文リンク色を明示 */
+main a { color: #1668c1; text-decoration: underline; }
+/* ライト背景上でも読めるよう、admin では共通ヘッダーを不透明ダークに固定 */
+.site-header { background: #0b0c0e; backdrop-filter: none; }

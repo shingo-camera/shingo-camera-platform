@@ -6,7 +6,7 @@
  * - 端末ID（scp_device_id）を X-Device-Id で送る。
  * - アプリ起動時に権限確認（POST /api/apps/sun-and-moon/app-start）:
  *     未ログイン → /login/ へ誘導
- *     権限なし   → 暫定で / (Platformトップ)へ誘導（WORK-011で商品詳細ページ実装後に変更）
+ *     権限なし   → 商品詳細 /products/sun-and-moon/ へ誘導
  *     権限あり   → APP_START アクセスログが1回記録され、アプリ利用開始。
  * - 計算API呼び出しの共通ラッパ window.SMApi(name, options) を提供。
  *     /api/apps/sun-and-moon/{name} へ Authorization: Bearer + X-Device-Id を付けて送る。
@@ -22,9 +22,9 @@
 
   var API_BASE = "/api/apps/sun-and-moon/";
   var LOGIN_URL = "/login/";
-  // 権限なし時の暫定誘導先。WORK-011 で商品詳細ページ実装後に /products/sun-and-moon へ変更する。
+  // 権限なし時の遷移先。WORK-011 で商品詳細ページを実装したため正式な遷移先へ変更。
   // ログイン済み・権限なしユーザーを /login/ へ送るのは意味的に不適切なため使わない。
-  var NO_ENTITLEMENT_URL = "/";
+  var NO_ENTITLEMENT_URL = "/products/sun-and-moon/";
 
   // 端末ID（プラットフォーム共通キー。認証要素ではない）。
   var deviceId = (function () {
@@ -110,7 +110,7 @@
       return false;
     }
     if (res.status === 403) {
-      // 権限なし（未購入/停止/期限切れ等）→ 暫定でトップへ（将来は商品詳細ページ）。
+      // 権限なし（未購入/停止/期限切れ等）→ 商品詳細ページへ誘導。
       window.location.href = NO_ENTITLEMENT_URL;
       return false;
     }
@@ -126,7 +126,7 @@
     try { document.documentElement.classList.remove("sm-auth-gate"); } catch (e) { /* noop */ }
   }
 
-  // 起動ガード: 未ログイン→/login/、権限なし→/。権限ありなら APP_START を1回記録して本体表示。
+  // 起動ガード: 未ログイン→/login/、権限なし→/products/sun-and-moon/。権限ありなら APP_START を1回記録して本体表示。
   // 遷移する場合（false）はゲートを維持して本体を見せない（未認証フラッシュ防止）。
   // 権限あり／通信失敗（true）のみ本体を表示する（通信失敗は各API側の権限確認に委ねる既存方針）。
   function boot() {

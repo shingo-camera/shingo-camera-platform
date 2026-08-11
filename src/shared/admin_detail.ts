@@ -68,6 +68,7 @@ export async function getUserDetail(
     .prepare(
       `SELECT t.PURCHASE_ID AS purchaseId, p.PRODUCT_CODE AS productCode,
               t.PURCHASE_SOURCE AS purchaseSource, t.EXTERNAL_PURCHASE_ID AS externalPurchaseId,
+              t.ORDER_ID AS orderId,
               t.PURCHASE_DATE AS purchaseDate, t.AMOUNT AS amount,
               t.PAYMENT_STATUS AS paymentStatus, t.REFUND_DATE AS refundDate
        FROM T_PURCHASE t JOIN M_PRODUCT p ON p.PRODUCT_ID = t.PRODUCT_ID

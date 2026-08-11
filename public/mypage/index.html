@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>MY PAGE — shingo_camera</title>
+  <link rel="stylesheet" href="/assets/site.css" />
+  <script src="/assets/vendor/supabase.js"></script>
+  <script src="/assets/site-config.js"></script>
+  <script src="/assets/site.js" defer></script>
+</head>
+<body data-page="mypage">
+  <header id="site-header" class="site-header"></header>
+
+  <main>
+    <div class="container">
+      <section class="launcher-section">
+        <div class="section-head reveal">
+          <p class="kicker">Library</p>
+          <h2>利用できるアプリ</h2>
+        </div>
+        <div class="launcher-grid" id="owned-products">
+          <p class="launcher-empty">読み込み中…</p>
+        </div>
+      </section>
+
+      <section class="launcher-section">
+        <div class="section-head">
+          <p class="kicker">Store</p>
+          <h2>利用できないアプリ</h2>
+        </div>
+        <div class="launcher-grid" id="available-products"></div>
+      </section>
+
+      <!-- 既存 HANABI(note)購入者向け 移行導線（site.js が条件表示）-->
+      <section class="launcher-section hidden" id="note-migration"></section>
+    </div>
+  </main>
+
+  <footer id="site-footer" class="site-footer"></footer>
+</body>
+</html>

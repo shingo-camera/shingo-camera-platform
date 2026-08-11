@@ -419,7 +419,91 @@ SUN AND MOON PLANNER の買い切り販売。権限付与の正本は署名検�
 - T_PURCHASE: PURCHASE_SOURCE=0 / PAYMENT_STATUS=1 / EXTERNAL_PURCHASE_ID=Session ID。T_USER_PRODUCT: STATUS=1 / GRANT_TYPE=0 / END_DATE=9999-12-31T23:59:59+09:00。
 - 二重購入: Checkout 作成前に available を確認し ALREADY_PURCHASED(409)。Stripe 側で二重決済成立時は T_PURCHASE を購入事実として保持、T_USER_PRODUCT は 1 件のまま（管理者が返金判断）。
 - 画面: `/purchase/success/`（status をリトライ確認）, `/purchase/cancel/`（DB 更新なし）。
-- 秘密情報（Cloudflare Secrets）: STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / STRIPE_PRICE_SUN_AND_MOON。
+- 秘密情報（Cloudflare Secrets）: STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / STRIPE_PRICE_SUN_AND_MOON / STRIPE_PRICE_HANABI / STRIPE_PRICE_HANABI_GOOGLE_EARTH。
+
+## 注文ライフサイクル堅牢化（WORK-011）
+
+WORK-007 の Stripe 買い切り販売を、複数商品購入・二重 Checkout 排他・障害回復・返金/係争追跡まで含めて堅牢化する（設計正本は ORDER_LIFECYCLE_DESIGN 群）。権限付与の正本は引き続き署名検証済み Webhook（主経路）。共通 fulfill を webhook / success recovery / admin reconcile の 3 経路で共有する。
+
+### 追加 API
+
+| Method | Path | 認証 | 内容 |
+|---|---|---|---|
+| POST | /api/purchases/checkout | 必須 | `{ productCodes[], operationId }`。attempt+lock を 1 batch 確定 → Stripe create（DB snapshot 完全再現）。既存 operationId は再利用/回復 |
+| POST | /api/purchases/recover | 必須 | success 画面から。`{ sessionId }`。metadata.auth_user_id 照合（他人 403）→ 共通 fulfill（Webhook より先でも即時反映） |
+| POST | /api/purchases/cancel | 必須 | cancel 画面から。`{ operationId }`（sessionId は受けない）。open は Stripe Expire API → CANCELLED / lock 解放 |
+| POST | /api/stripe/webhook | 不要（署名必須） | completed→共通 fulfill / expired→EXPIRED+lock 解放 / refund・dispute→T_PAYMENT_EVENT 記録 |
+| POST | /api/admin/purchases/reconcile | 管理者 | `{ sessionId }` から共通 fulfill を実行。結果種別を返す（DB 直接編集しない） |
+| GET | /api/admin/orders | 管理者 | 注文一覧（最新 100 件） |
+| GET | /api/admin/orders/{orderId} | 管理者 | 注文詳細（明細・PaymentIntent・payment_event） |
+| GET | /api/admin/payment-events | 管理者 | 決済運用イベント一覧（duplicate/refund/dispute/B2 追跡） |
+
+### 排他・冪等・回復の要点
+
+- **並行排他（方式B）**: `T_PRODUCT_CHECKOUT_LOCK` の PRIMARY KEY(AUTH_USER_ID, PRODUCT_ID)。行の存在＝active 予約。in-memory lock を使わない。
+- **1 batch 原子性**: 新規 attempt＋item＋cart 全 lock を 1 batch。lock は素 INSERT（ON CONFLICT なし）で、1 件でも PK 競合すれば batch 全体が rollback（部分ロックを残さない）→ ALREADY_IN_PROGRESS(409)。Local D1（node:sqlite）で実測。
+- **operationId**: browser 生成 UUID を server 検証。既存 attempt の再利用条件は OPERATION_ID + AUTH_USER_ID + CART_KEY の 3 一致。不一致は OPERATION_MISMATCH(409)。
+- **idempotencyKey**: server 生成 `checkout:<AUTH_USER_ID>:<OPERATION_ID>`（別 user は別 key）。
+- **create パラメータ完全再現**: BUYER_EMAIL / STRIPE_PRICE_ID / PRODUCT_CODE / SORT_NO を attempt 開始時に snapshot し、retry 時は実行時の auth.email / Price 解決 / 時刻を使わず DB から再現。EXPECTED_AMOUNT は将来の監査用予約列で現行フローでは未使用（0 を許容）。金額の正本は Stripe Price / Checkout Session。
+- **create 失敗分類**: 確定失敗(InvalidRequest/Authentication/Permission)のみ lock 解放。RATE_LIMIT / INCONSISTENT / NETWORK / SERVER は lock 維持（迷えば維持側）。判定不能は SERVER_INDETERMINATE。
+- **共通 fulfill**: Session を Stripe から expand 取得し再検証（payment_status / currency / line_items / Price / quantity / amount 合計 / metadata.auth_user_id）。metadata を正本にしない。paid なら T_ORDER＋T_PURCHASE×N＋T_USER_PRODUCT×N を原子 batch、T_ORDER に PAYMENT_INTENT_ID 保存。Session ID 冪等。
+- **二重 paid**: fulfill 時に AUTH_USER_ID＋PRODUCT_ID で別注文 paid を検出。entitlement は 1 件維持、T_PAYMENT_EVENT に DUPLICATE_PAID 記録・管理者通知。自動返金しない。
+- **refund / dispute**: T_ORDER.PAYMENT_INTENT_ID で逆引き。T_PAYMENT_EVENT へ記録（event.id 冪等）。自動剥奪しない。
+
+### 追加テーブル（migration 0006）
+
+- `T_CHECKOUT_ATTEMPT` / `T_CHECKOUT_ATTEMPT_ITEM`: 支払い試行層（paid 前）。既存 T_ORDER/T_PURCHASE/T_USER_PRODUCT は無改変維持。
+- `T_PRODUCT_CHECKOUT_LOCK`: 二重 Checkout 排他（PK(AUTH_USER_ID, PRODUCT_ID)）。
+- `T_PAYMENT_EVENT`: 運用イベント（DUPLICATE_PAID/REFUND/DISPUTE/FULFILL_FAILURE/RECONCILE/SERVER_INDETERMINATE。event.id 一意で冪等）。
+- `T_ORDER.PAYMENT_INTENT_ID` 列追加（refund/dispute 逆引き）。
+
+### STORE / 完了・キャンセル画面
+
+- STORE: 複数選択→合計→1 回 Checkout。ログイン必須。既保有は選択不可、進行中は「購入手続き中」バナー（再開/取消）。依存 HANABI_GOOGLE_EARTH←HANABI を UI ガイド（正本は server の precheck）。表示価格は参考値で、実課金は Stripe Price を正本とする。
+- success: `session_id` を recover API へ渡し即時反映を試み、`/api/account/products` で反映確認 polling。
+- cancel: `operation_id` を cancel API へ渡し attempt を明示キャンセル（呼ばれない場合は expired Webhook / 開始時 stale 確認で回収）。
+
+### Stripe Dashboard / Secrets（デプロイ前に要確認）
+
+- **APP_BASE_URL**（非秘密の環境変数）を設定する。Stripe の success_url / cancel_url はこの固定オリジンから生成し、`request.url.origin` は使わない（同一 operation の retry で origin が揺れて Stripe create パラメータが変わるのを防ぐ）。Local は `.dev.vars` に `http://localhost:8787`、Production は wrangler.toml `[vars]` か Dashboard の Variables に実 URL を設定。未設定だと checkout は 500（壊れた URL の Session を作らない）。
+- Secrets: `STRIPE_PRICE_HANABI` / `STRIPE_PRICE_HANABI_GOOGLE_EARTH` を Cloudflare Secret（Local は .dev.vars）に設定（STORE で 3 商品販売するため）。
+- Webhook イベント有効化: `checkout.session.completed` / `checkout.session.expired` / `charge.refunded`（または `refund.*`）/ `charge.dispute.created|updated|closed`。
+
+### 障害回復の要点（追補）
+
+- **CREATE_ATTEMPTED**: Stripe create を呼ぶ直前に `T_CHECKOUT_ATTEMPT.CREATE_ATTEMPTED=1` を DB 確定する。`CREATE_ATTEMPTED=0 + SID=NULL`＝create 未試行（cancel で lock 解放可）、`CREATE_ATTEMPTED=1 + SID=NULL`＝create 結果不明（Session が存在し得るため cancel だけで lock を解放せず、同一 idempotencyKey の recover で収束）。
+- **cancel の lock 解放**: open は Stripe Expire API が成功したときのみ「expired 確定」として解放。expire 失敗時は再 retrieve で complete/expired を確定できたときのみ対応し、確定できなければ lock 維持。「Session が存在するかもしれないのに再購入を許可しない」を優先。
+- **CASE C（SID 保存失敗）**: fulfill 後の attempt 特定は第一に STRIPE_SESSION_ID 一致。見つからない場合のみ Session の `client_reference_id`(=operationId) で再特定し、①OPERATION_ID 一致 ②検証済み AUTH_USER_ID 一致 ③Stripe 実 line_items の商品構成 = ATTEMPT_ITEM snapshot = CART_KEY、を全て満たしたときのみ SID 回収 → attempt PAID → lock 解放（attempt/lock の残留を防ぐ）。
+- **success 画面**: recover API が返す「今回 Session の購入商品コード（purchasedCodes）」だけを追跡し、その全てが available になったときのみ購入完了表示（既保有の別商品による誤判定を避ける）。
+- **cancel 画面**: server の結果（cancelled / expired / already_paid / 結果不明）に応じて表示。already_paid や結果不明のときに「請求されていません」と断定しない。
+
+### E2E 手順（Stripe 実機依存・自動テスト対象外）
+
+以下は Stripe テスト環境での手動 E2E で確認する（unit/DB テストは `npm test` で自動化済み）:
+
+1. 単一/複数商品購入 → success 画面で反映 → `/api/account/products` に granted。
+2. 同一 operationId 再送（ネットワーク切断再現）→ 既存 Checkout URL に戻る（多重 Session を作らない）。
+3. 別 user が他人の `session_id` で recover → 403 SESSION_FORBIDDEN。
+4. Checkout を離脱 → cancel 画面 → 再度同一商品を購入可能（lock 解放）。
+5. Checkout 放置で expire → expired Webhook で attempt EXPIRED / lock 解放。
+6. 二重支払い（Webhook 再送・二重タブ）→ entitlement 1 件、payment-events に DUPLICATE_PAID。
+7. 返金・チャージバックを Dashboard で発生 → payment-events に REFUND/DISPUTE（entitlement は自動剥奪されない）。
+8. admin reconcile に paid Session を渡す → newly_fulfilled / already_fulfilled。
+
+### Local/Test 専用: 購入状態リセット（Production 不可）
+
+同一テストユーザー（Supabase Auth・メール・パスワード・AUTH_USER_ID は維持）で「購入前 → 購入 → 確認 → リセット → 再購入」を繰り返すための **Local/Test 環境専用**機能。Production では使用できない。
+
+- **エンドポイント**: `POST /api/admin/test/reset-purchases`、body は `{ "authUserId": "..." }`（AUTH_USER_ID を正本）または `{ "email": "..." }`（内部で AUTH_USER_ID へ解決）。
+- **二重防御**: ①環境ガード（**`APP_ENV` が `local` または `test` のときのみ利用可能**。`production` / 未設定 / 空文字 / 未知値 / typo は全て 404 `PRODUCTION_FORBIDDEN` で拒否する deny-by-default）②`requireAdmin` 必須。一般ユーザーは自分の購入履歴も消せない。
+- **削除対象**（対象ユーザー分のみ・FK 安全順・1 D1 batch で全成功 or 全 rollback）: T_USER_PRODUCT / T_PURCHASE / T_PAYMENT_EVENT（`AUTH_USER_ID` 一致 or 対象ユーザーの `ORDER_ID` 由来）/ T_ORDER / T_PRODUCT_CHECKOUT_LOCK / T_CHECKOUT_ATTEMPT_ITEM / T_CHECKOUT_ATTEMPT。他ユーザー・無関係データは削除しない。M_USER（Auth ユーザー）は削除しない。
+- **active Checkout の安全処理**（DB 削除前の Phase 1）: 対象ユーザーの進行中 attempt（CREATING/OPEN）を Stripe で確認し、`CREATE_ATTEMPTED=1 + SID=NULL`（create 結果不明）や Stripe 状態を確定できない場合は `ACTIVE_CHECKOUT_INDETERMINATE`(409) で中止し **DB を一切削除しない**（部分削除を作らない）。open Session は Stripe Expire 成功時のみ削除に進む。paid/complete Session は expire しない。
+- **Stripe 側は削除しない**: Checkout Session / PaymentIntent / Charge / Refund 等の実履歴は残す。リセットするのは Platform DB のみ。
+- **reconcile との関係**: reset で未購入に戻した後でも、過去の Stripe Session ID を `POST /api/admin/purchases/reconcile` に渡せば再付与できる（正常。reset → reconcile 再付与のテストが可能）。
+- **reset 後の期待状態**: `GET /api/account/products` で対象 3 商品（SUN_AND_MOON / HANABI / HANABI_GOOGLE_EARTH）が granted=false になり、STORE で購入済み表示が消えて再購入可能になる。
+- **注意**: Stripe API と D1 は 1 トランザクションにできないため、Phase 1 で一部 Session を expire した後に別の active attempt が状態不明で全体中止するケースは許容する（DB は無変更のため、次回 reset で expired として安全に処理される）。
+- **秘密情報**: テストユーザーの実メール / 実 AUTH_USER_ID / 実 Stripe Session ID をソース・spec に固定で書かない。
+- **response 例**: `{ "result": "OK", "data": { "authUserId": "...", "deleted": { "userProducts": 3, "purchases": 3, "orders": 3, "checkoutAttempts": 3, "checkoutAttemptItems": 3, "checkoutLocks": 3, "paymentEvents": 3 } } }`。
 
 ## note移行 API（WORK-008）
 

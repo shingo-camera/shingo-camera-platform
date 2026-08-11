@@ -102,7 +102,12 @@
       btn.disabled = true;
       try {
         var client = await getClient();
-        var redirectTo = window.location.origin + "/login/";
+        // 目的操作→LOGIN→SIGNUP と進んだ場合、元の目的地（redirect）を失わない（§10A）。
+        // メール認証後は LOGIN へ戻り、そこで redirect が再評価される。redirect なしは
+        // LOGIN 側の既定で MY PAGE へ（§10B）。外部 URL は safeRedirectPath が弾く。
+        var dest = safeRedirectPath();
+        var redirectTo = window.location.origin + "/login/" +
+          (dest ? "?redirect=" + encodeURIComponent(dest) : "");
         var r = await client.auth.signUp({
           email: email.value,
           password: password.value,
@@ -121,6 +126,20 @@
     });
   }
 
+  // redirect クエリの安全検証（§9）: 「/」始まり・「//」でない・URL 解決後 origin 一致のみ許可。
+  // 通過した場合は正規化済みパス（pathname+search+hash）を返し、それ以外は null。
+  // /login/ 自身への redirect は無限ループ防止のため無効とする。
+  function safeRedirectPath() {
+    try {
+      var rp = new URLSearchParams(window.location.search).get("redirect");
+      if (!rp || rp.charAt(0) !== "/" || rp.charAt(1) === "/") return null;
+      var resolved = new URL(rp, window.location.origin);
+      if (resolved.origin !== window.location.origin) return null;
+      if (resolved.pathname === "/login/" || resolved.pathname === "/login") return null;
+      return resolved.pathname + resolved.search + resolved.hash;
+    } catch (e) { return null; }
+  }
+
   // login: ログイン → セッション取得 → M_USER 同期
   async function initLogin() {
     var email = document.getElementById("email");
@@ -130,14 +149,25 @@
     var sessionBox = document.getElementById("session");
     if (!btn) return;
 
-    // 既存セッションがあれば表示（メール認証リンクからの戻り等）
+    // LOGIN → SIGNUP へ進んでも元の redirect を失わない（§10A）: SIGNUP リンクへ引継。
+    (function () {
+      var dest = safeRedirectPath();
+      if (!dest) return;
+      document.querySelectorAll('a[href="/signup/"]').forEach(function (a) {
+        a.href = "/signup/?redirect=" + encodeURIComponent(dest);
+      });
+    })();
+
+    // 既にログイン済みなら LOGIN フォームへ留めない（§8）。
+    // redirect ありならその先へ、なければ MY PAGE へ（safeRedirectPath が /login/ を弾くため無限 redirect しない）。
     (async function () {
       try {
         var client = await getClient();
         var s = await client.auth.getSession();
         if (s.data && s.data.session) {
-          showSession(sessionBox, s.data.session);
           await syncAccount(s.data.session.access_token);
+          var dest = safeRedirectPath();
+          window.location.href = dest || "/mypage/";
         }
       } catch (e) { /* 未ログインは正常 */ }
     })();
@@ -157,6 +187,9 @@
           setMsg(msg, "ログインしました。", "ok");
           showSession(sessionBox, r.data.session);
           await syncAccount(r.data.session.access_token);
+          // LOGIN は中継地点（§7）: redirect ありは元の目的地へ、なしは MY PAGE へ。
+          var dest = safeRedirectPath();
+          window.location.href = dest || "/mypage/";
         }
       } catch (e) {
         setMsg(msg, "ログイン処理でエラーが発生しました。", "err");
@@ -178,6 +211,18 @@
         }
       });
     }
+
+    // メール/パスワード入力欄で Enter キー押下 → ログイン実行（form 無し・type=button でも送信可能に）
+    [email, password].forEach(function (el) {
+      if (el) {
+        el.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (!btn.disabled) btn.click();
+          }
+        });
+      }
+    });
   }
 
   function showSession(box, session) {
@@ -242,7 +287,14 @@
         var client = await getClient();
         var r = await client.auth.updateUser({ password: password.value });
         if (r.error) {
-          setMsg(msg, "パスワードの更新に失敗しました。リンクの有効期限をご確認ください。", "err");
+          // same_password（現在と同じパスワード）は「リンク期限切れ」ではないため文言を分ける。
+          var ec = r.error.code || "";
+          var em = r.error.message || "";
+          if (ec === "same_password" || /same_password|should be different|different from the old/i.test(em)) {
+            setMsg(msg, "現在とは異なるパスワードを設定してください。", "err");
+          } else {
+            setMsg(msg, "パスワードの更新に失敗しました。リンクの有効期限をご確認ください。", "err");
+          }
         } else {
           // パスワード変更成功後、M_USER.PASSWORD_CHANGE_DATE 更新API（WORK後続）は
           // WORK-003 範囲外。ここでは成功案内のみ。

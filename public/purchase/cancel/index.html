@@ -3,22 +3,133 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>購入をキャンセルしました</title>
+<title>購入手続きの確認</title>
 <link rel="stylesheet" href="/assets/common.css" />
 <style>
   .purchase-box { max-width: 480px; margin: 60px auto; padding: 24px; text-align: center; }
-  .msg { margin: 20px 0; font-size: 16px; color: #665; }
+  .msg { margin: 20px 0; font-size: 16px; color: var(--muted, #9aa0aa); }
+  .msg.paid { color: var(--ok, #4fd18b); }
+  .spinner { margin: 16px auto; width: 24px; height: 24px; border: 3px solid var(--border, #2a2f3a); border-top-color: var(--accent, #4f8cff); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .actions { margin-top: 24px; }
-  .actions a { color: #1668c1; text-decoration: none; }
+  .actions a { color: var(--accent, #4f8cff); text-decoration: none; }
 </style>
 </head>
 <body>
 <div class="purchase-box">
-  <h1>購入は完了していません</h1>
-  <div class="msg">購入手続きはキャンセルされました。料金は請求されていません。</div>
+  <h1 id="title">購入手続きの確認</h1>
+  <div id="spinner" class="spinner"></div>
+  <div class="msg" id="msg">状態を確認しています…</div>
   <div class="actions">
-    <a href="/">トップへ戻る</a>
+    <a href="/store/">ストアへ戻る</a>
   </div>
 </div>
+
+<script src="/assets/vendor/supabase.js"></script>
+<script>
+(async function () {
+  var titleEl = document.getElementById("title");
+  var msgEl = document.getElementById("msg");
+  var spinner = document.getElementById("spinner");
+
+  function show(title, msg, paid) {
+    titleEl.textContent = title;
+    msgEl.textContent = msg;
+    msgEl.className = "msg" + (paid ? " paid" : "");
+    spinner.style.display = "none";
+  }
+
+  // cancel_url に付与された operation_id で、サーバーに明示キャンセルを依頼する。
+  // sessionId は送らない（サーバーが operationId + AUTH_USER_ID で attempt を特定）。
+  // 表示は必ず「サーバーの結果」に従う。請求有無を勝手に断定しない。
+  var params = new URLSearchParams(location.search);
+  var operationId = params.get("operation_id");
+
+  // pending は「サーバーで終着が確認できた場合のみ」削除する。API 結果確定前や状態不明時に
+  // 消すと再開導線が失われる。さらに、cancel_url の operation_id と現在の pending.operationId が
+  // 一致するときだけ消す（古い cancel ページを後から開いても、別の新しい Checkout の pending を
+  // 消さない）。
+  function clearPendingIfMatches(opId) {
+    try {
+      var v = localStorage.getItem("shingo_pending_checkout");
+      var p = v ? JSON.parse(v) : null;
+      if (p && p.operationId === opId) {
+        localStorage.removeItem("shingo_pending_checkout");
+      }
+    } catch (e) { /* noop */ }
+  }
+
+  // operation_id が無い（直接アクセス等）→ 断定せず案内のみ
+  if (!operationId) {
+    show("購入手続きの確認", "購入手続きの状態を確認できませんでした。ご不明な場合はストアからご確認ください。", false);
+    return;
+  }
+
+  var deviceId = (function () {
+    try {
+      var k = "scp_device_id", v = localStorage.getItem(k);
+      if (!v) { v = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()); localStorage.setItem(k, v); }
+      return v;
+    } catch (e) { return String(Date.now()); }
+  })();
+
+  async function getToken() {
+    var res = await fetch("/api/config", { headers: { "X-Device-Id": deviceId } });
+    if (!res.ok) return null;
+    var body = await res.json();
+    if (!self.supabase || !self.supabase.createClient) return null;
+    var client = self.supabase.createClient(body.data.supabaseUrl, body.data.supabaseAnonKey);
+    var s = await client.auth.getSession();
+    return s && s.data && s.data.session ? s.data.session.access_token : null;
+  }
+
+  var token = await getToken();
+  if (!token) {
+    // 未ログイン → stale 回収（expired Webhook / 開始時確認）に委ねる。請求有無を断定しない。
+    show("購入手続きの確認", "購入手続きの状態を確認しています。ログイン後、ストアからご確認いただけます。", false);
+    return;
+  }
+
+  try {
+    var res = await fetch("/api/purchases/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token, "X-Device-Id": deviceId },
+      body: JSON.stringify({ operationId: operationId }),
+    });
+    var body = null;
+    try { body = await res.json(); } catch (e) {}
+    var result = body && body.data && body.data.result;
+    var code = body && body.error && body.error.code;
+
+    if (res.ok && result === "cancelled") {
+      clearPendingIfMatches(operationId);
+      show("購入は完了していません", "購入手続きはキャンセルされました。料金は請求されていません。", false);
+    } else if (res.ok && result === "expired") {
+      clearPendingIfMatches(operationId);
+      show("購入は完了していません", "購入手続きの有効期限が切れました。料金は請求されていません。", false);
+    } else if (res.ok && result === "already_paid") {
+      // 支払い済み → 「請求されていません」とは言わない
+      clearPendingIfMatches(operationId);
+      show("購入は完了しています", "この商品はすでに購入が完了しています。ストアやアプリからご利用いただけます。", true);
+    } else if (res.status === 409 && code === "CANCEL_INDETERMINATE") {
+      // create 結果不明 → 請求有無を断定しない
+      show("購入手続きの確認", "購入手続きの状態を確認しています。しばらくしてから、ストアの「購入手続きを再開」でご確認ください。", false);
+    } else if (res.status === 503 && code === "CANCEL_RETRY") {
+      show("購入手続きの確認", "購入手続きの状態を確認しています。しばらくしてからご確認ください。", false);
+    } else if (res.status === 403) {
+      show("購入手続きの確認", "この購入情報にはアクセスできません。", false);
+    } else if (res.status === 404) {
+      // 対象 attempt なし（既に解決済み等）→ 断定せず案内
+      show("購入手続きの確認", "対象の購入手続きが見つかりませんでした。ストアからご確認ください。", false);
+    } else {
+      // その他・結果不明 → 請求有無を断定しない
+      show("購入手続きの確認", "購入手続きの状態を確認しています。しばらくしてからご確認ください。", false);
+    }
+  } catch (e) {
+    // 通信失敗 → 結果不明。請求有無を断定しない。
+    show("購入手続きの確認", "購入手続きの状態を確認できませんでした。しばらくしてからご確認ください。", false);
+  }
+})();
+</script>
 </body>
 </html>

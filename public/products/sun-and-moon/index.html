@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>SUN AND MOON PLANNER — shingo_camera</title>
+  <link rel="stylesheet" href="/assets/site.css" />
+  <script src="/assets/vendor/supabase.js"></script>
+  <script src="/assets/site-config.js"></script>
+  <script src="/assets/site.js" defer></script>
+</head>
+<body data-page="product-sun-and-moon">
+  <header id="site-header" class="site-header"></header>
+
+  <main>
+    <div class="container detail">
+      <!-- アイコン / 製品名 -->
+      <section class="detail-hero">
+        <div class="app-icon" data-app-icon="SUN_AND_MOON"></div>
+        <div class="reveal">
+          <h1>SUN AND MOON PLANNER</h1>
+          <p class="tagline">太陽・月と人物・建物を組み合わせた撮影計画を、正確に。</p>
+        </div>
+      </section>
+
+      <!-- 製品概要 -->
+      <section class="detail-block reveal">
+        <p class="label">Overview</p>
+        <p>撮影地と被写体の位置関係から、太陽や月が狙った構図に重なる時刻を計算します。感覚に頼らず、いつ・どこで撮れるかを数字で確かめられます。</p>
+      </section>
+
+      <!-- 機能 -->
+      <section class="detail-block reveal">
+        <p class="label">Features</p>
+        <ul class="feature-list">
+          <li>撮影地と被写体から、太陽・月が重なるチャンスを探索</li>
+          <li>満月・ピンポイントの撮影機会を計算</li>
+          <li>地図上での天体位置表示・軌跡確認</li>
+          <li>KMZ 出力による Google Earth 連携</li>
+        </ul>
+      </section>
+
+      <!-- アプリUI（大きな1組。画像は準備中プレースホルダ）-->
+      <section class="detail-block reveal">
+        <p class="label">Interface</p>
+        <div class="showcase">
+          <div class="frame">アプリ画面（準備中）</div>
+          <div class="caption">地図上で撮影地と被写体を指定し、計画を立てる。</div>
+        </div>
+      </section>
+
+      <!-- シミュレーション ↔ 実写結果（大きな1組。Before/After 羅列にしない）-->
+      <section class="detail-block reveal">
+        <p class="label">Simulation &amp; Result</p>
+        <p>計算したシミュレーションと、実際に撮影できた一枚。両者の一致がこのツールの核心です。</p>
+        <div class="match mt-16">
+          <div class="cell">
+            <div class="frame">シミュレーション（準備中）</div>
+            <div class="cell-label">Simulation</div>
+          </div>
+          <div class="cell">
+            <div class="frame">実写結果（準備中）</div>
+            <div class="cell-label">Result</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- note 詳細記事への誘導（URL 未確定なら非活性）-->
+      <section class="detail-block reveal">
+        <p class="label">Guide</p>
+        <p>詳しい使い方・撮影計画の考え方・作例は note で公開予定です。</p>
+        <div class="note-cta" id="sam-note-link"></div>
+      </section>
+
+      <!-- 購入導線（site.js が状態別に描画: 未ログイン→login / 未購入→checkout / 購入済→アプリ）-->
+      <section class="buy-block reveal">
+        <div class="price" id="sam-price">価格は準備中です</div>
+        <div id="sam-action"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer id="site-footer" class="site-footer"></footer>
+</body>
+</html>

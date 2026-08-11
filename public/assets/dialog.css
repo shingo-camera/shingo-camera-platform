@@ -1,0 +1,108 @@
+/* Platform 共通ダイアログ（既存ダークテーマに調和。変数はフォールバック付き） */
+.scp-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transition: opacity 0.16s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.scp-dialog-overlay.is-open { opacity: 1; }
+
+.scp-dialog {
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg-1, #15181d);
+  color: var(--text, #e8eaed);
+  border: 1px solid var(--line, #2a2f3a);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  padding: 22px 20px 16px;
+  transform: translateY(8px) scale(0.98);
+  transition: transform 0.16s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.scp-dialog-overlay.is-open .scp-dialog { transform: translateY(0) scale(1); }
+
+.scp-dialog__title {
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.4;
+  margin-bottom: 10px;
+  color: var(--text, #e8eaed);
+}
+.scp-dialog__message {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-2, #a4a9b2);
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  word-break: normal;
+  line-break: strict;
+}
+.scp-dialog__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+.scp-dialog__btn {
+  flex: 1;
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.scp-dialog__btn--secondary {
+  background: transparent;
+  border-color: var(--line, #2a2f3a);
+  color: var(--text, #e8eaed);
+}
+.scp-dialog__btn--secondary:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--text-3, #6b7079);
+}
+.scp-dialog__btn--primary {
+  background: var(--accent, #4f8cff);
+  color: #fff;
+}
+.scp-dialog__btn--primary:hover { background: var(--accent-hover, #3d78e6); }
+.scp-dialog__btn--danger.scp-dialog__btn--primary,
+.scp-dialog__btn--danger {
+  background: var(--danger, #e5484d);
+  color: #fff;
+}
+.scp-dialog__btn--danger.scp-dialog__btn--primary:hover { background: #cf3b40; }
+
+.scp-dialog__btn:focus-visible {
+  outline: 2px solid var(--accent, #4f8cff);
+  outline-offset: 2px;
+}
+
+/* 単一ボタン（info）は幅を詰める */
+.scp-dialog__actions:has(.scp-dialog__btn--primary:only-child) .scp-dialog__btn--primary {
+  flex: 0 1 auto;
+  min-width: 120px;
+  margin-left: auto;
+}
+
+@media (max-width: 480px) {
+  .scp-dialog { max-width: 100%; padding: 20px 18px 14px; }
+  .scp-dialog__actions { flex-direction: column-reverse; }
+  .scp-dialog__btn { width: 100%; }
+  .scp-dialog__actions:has(.scp-dialog__btn--primary:only-child) .scp-dialog__btn--primary {
+    margin-left: 0; min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scp-dialog-overlay, .scp-dialog { transition: none; }
+}

@@ -21,6 +21,12 @@
 # Production では wrangler.toml [vars] の production が使われる。
 APP_ENV=local
 
+# APP_BASE_URL: Stripe の success_url / cancel_url を生成する固定オリジン（非秘密）。
+# request.url.origin を使わず、この固定値から生成する（retry で origin が揺れないため）。
+#   Local     : wrangler dev の既定ポートに合わせる（下記）。
+#   Production : wrangler.toml [vars] もしくは Dashboard の Variables で実 URL を設定。
+APP_BASE_URL=http://localhost:8787
+
 # SUPABASE_URL / SUPABASE_ANON_KEY はフロントへ配布してよい非秘密値。
 # ただしプロジェクト運用として Git へ実値を保存しない。
 #   Local     : このファイルをコピーした .dev.vars に実値を記入（Git 除外）
@@ -40,5 +46,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 STRIPE_PRICE_SUN_AND_MOON=
+STRIPE_PRICE_HANABI=
+STRIPE_PRICE_HANABI_GOOGLE_EARTH=
 ADMIN_AUTH_USER_ID=
 MAIL_API_KEY=
