@@ -51,8 +51,7 @@ APP_ENV = "production"
 #     - Local     : .dev.vars に APP_BASE_URL=http://localhost:8787 を記入（.dev.vars.example 参照）
 #   例: APP_BASE_URL = "https://platform.example.com"
 # APP_BASE_URL = "https://<本番の公開URL>"
-APP_BASE_URL = "https://shingo-camera-platform.good-old-acappella-song.workers.dev"
-
+APP_BASE_URL = "https://shingo-camera.com"
 # Workers Static Assets（WORK-003）
 #
 # 責務分担:
