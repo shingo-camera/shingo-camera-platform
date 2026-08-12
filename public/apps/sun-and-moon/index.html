@@ -305,7 +305,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
 /* Leafletコントロールの余白を詰める（右カラムが上から詰まる／HANABI準拠） */
 .leaflet-top .leaflet-control{margin-top:4px;}
 /* 5: スマホ専用の地図上 太陽/月トグル（Leafletズームの下・地図操作を妨げない最小サイズ） */
-#map-body-toggle{display:none;position:absolute;top:88px;left:10px;z-index:500;
+/* スマホ地図上の太陽/月切替。左上(ズーム＋検索)と重ならないよう右上へ配置。
+   スマホでは .leaflet-top.leaflet-right が非表示のため右上は空く。safe-area(ノッチ)考慮。 */
+#map-body-toggle{display:none;position:absolute;
+  top:calc(10px + env(safe-area-inset-top));
+  right:calc(10px + env(safe-area-inset-right));left:auto;z-index:500;
   padding:6px 10px;border:1px solid var(--bd);border-radius:6px;
   background:var(--sur2);color:var(--ac);font-family:'Space Mono',monospace;
   font-size:12px;font-weight:700;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,.5);cursor:pointer;}
