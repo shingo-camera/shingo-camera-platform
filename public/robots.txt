@@ -4,3 +4,4 @@
 
 User-agent: *
 Disallow: /api/
+Sitemap: https://shingo-camera.com/sitemap.xml
