@@ -1,0 +1,6 @@
+# robots.txt — shingo-camera Platform
+# HTMLページは meta noindex で検索除外する方針のため Disallow しない
+# （Disallow するとクローラが noindex を読めないため）
+
+User-agent: *
+Disallow: /api/
