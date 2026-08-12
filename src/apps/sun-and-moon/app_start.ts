@@ -43,5 +43,12 @@ export async function handleSunAndMoonAppStart(request: Request, env: Env): Prom
     // 設定エラーは記録をスキップするのみ（利用者へ内部詳細を返さない）。
   }
 
-  return jsonOk({ started: true });
+  // 管理者判定（フロントの表示制御用）。判定正本は既存 requireAdmin（src/shared/admin.ts）と
+  // 同一：「検証済み AUTH_USER_ID === env.ADMIN_AUTH_USER_ID（未設定時は非管理者）」。
+  // 新しい判定方式は作らず、既存レスポンスへの後方互換なフィールド追加のみ
+  // （既存クライアントは isAdmin を無視してそのまま動作する）。
+  const isAdmin =
+    !!env.ADMIN_AUTH_USER_ID && result.auth.authUserId === env.ADMIN_AUTH_USER_ID;
+
+  return jsonOk({ started: true, isAdmin });
 }

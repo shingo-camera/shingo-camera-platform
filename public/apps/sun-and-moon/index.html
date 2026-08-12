@@ -51,6 +51,11 @@ html,body{height:100%;background:var(--bg);color:var(--tx);
 
 /* メインラッパー */
 #wrap{position:fixed;top:var(--hdr);bottom:10px;left:0;right:0;display:flex;overflow:hidden;}
+/* 固有建物（プリセット対象）は Admin 専用（WORK: 発売前改修 課題1）。
+   判定正本はサーバー app-start の isAdmin（既存 requireAdmin と同一式）。
+   Admin 時のみ auth-integration.js が html へ .sm-admin を付与する。 */
+html:not(.sm-admin) .sm-admin-only { display: none !important; }
+
 /* ピンチズーム禁止（地図・プレビューcanvas除く） */
 #wrap,#right,#preview-panel,#pv-left,#diag-wrap{touch-action:pan-x pan-y;}
 
@@ -299,6 +304,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
 .map-ico-group{display:flex;flex-direction:column;gap:4px;position:relative;}
 /* Leafletコントロールの余白を詰める（右カラムが上から詰まる／HANABI準拠） */
 .leaflet-top .leaflet-control{margin-top:4px;}
+/* 5: スマホ専用の地図上 太陽/月トグル（Leafletズームの下・地図操作を妨げない最小サイズ） */
+#map-body-toggle{display:none;position:absolute;top:88px;left:10px;z-index:500;
+  padding:6px 10px;border:1px solid var(--bd);border-radius:6px;
+  background:var(--sur2);color:var(--ac);font-family:'Space Mono',monospace;
+  font-size:12px;font-weight:700;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,.5);cursor:pointer;}
+@media(max-width:600px){#map-body-toggle{display:block;}}
 .leaflet-right .leaflet-control{margin-right:4px;}
 /* 固定表示グループ：地図上の固定ラベル（太陽/月時間の凡例・中央ヒント等）を一元管理。
    上詰め整列の対象外。display:contentsのため各ラベルの表示位置・座標系は完全に現状維持。
@@ -569,7 +580,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
 }
 /* 被写体高±行は常に1行（ドロワー/詳細設定でも折返させない） */
 /* 被写体高±行は常に1行。ドロワーはJSがclone（同一id2つ）するため属性セレクタで両方に効かせる */
-[id="subject-offset-ui"] .tbtn{flex:0 0 auto;min-width:0;}
 /* 数値調整行の共通2段レイアウト（三脚高さ/撮影地点標高/対象標高）
    1段目: ラベル左・現在値右 ／ 2段目: Rst先頭＋均等幅ボタン（nowrapで必ず1行・折返/縦崩れ/横スクロール防止） */
 .numrow{margin-top:6px;}
@@ -727,7 +737,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
           ✥ 登録対象・撮影地点 移動モード
         </label>
       </div>
-      <div class="ig" style="margin-top:4px;">
+      <div class="ig sm-admin-only" style="margin-top:4px;">
         <label>プリセット対象を選択</label>
         <div class="target-csd" data-target-csd="landmark">
           <button type="button" class="target-csd-trigger" onclick="toggleTargetCsd('landmark')">プリセット対象を選択 ▾</button>
@@ -846,7 +856,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
       <div class="numrow">
         <div class="nr-head">
           <label>撮影地点</label>
-          <span class="nr-val" id="elev-offset-disp">+0m</span>
+          <span class="nr-val" id="elev-offset-disp" onclick="openElevOffsetPad()" title="タップで入力" style="cursor:pointer;">+0m</span>
         </div>
         <div class="nr-btns">
           <span class="now-btn" onclick="shiftElevOffset(0,true)" title="リセット" aria-label="リセット">↺</span>
@@ -856,22 +866,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
           <div class="tbtn" onclick="shiftElevOffset(1)">+1</div>
           <div class="tbtn" onclick="shiftElevOffset(3)">+3</div>
           <div class="tbtn" onclick="shiftElevOffset(5)">+5</div>
-        </div>
-      </div>
-      <!-- 被写体 高さオフセット（人物タイプのみ表示） -->
-      <div id="subject-offset-ui" class="numrow">
-        <div class="nr-head">
-          <label>対象標高</label>
-          <span class="nr-val" id="subject-offset-disp">+0m</span>
-        </div>
-        <div class="nr-btns">
-          <span class="now-btn" onclick="shiftSubjectOffset(0,true)" title="リセット" aria-label="リセット">↺</span>
-          <div class="tbtn" onclick="shiftSubjectOffset(-5)">−5</div>
-          <div class="tbtn" onclick="shiftSubjectOffset(-3)">−3</div>
-          <div class="tbtn" onclick="shiftSubjectOffset(-1)">−1</div>
-          <div class="tbtn" onclick="shiftSubjectOffset(1)">+1</div>
-          <div class="tbtn" onclick="shiftSubjectOffset(3)">+3</div>
-          <div class="tbtn" onclick="shiftSubjectOffset(5)">+5</div>
         </div>
       </div>
     </div>
@@ -929,6 +923,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
     <!-- マップパネル -->
     <div id="mapbox">
       <div id="map"></div>
+      <!-- スマホ専用：地図上 太陽/月切替（既存 setSunsetMode を再利用。PCは従来UIのまま） -->
+      <button id="map-body-toggle" onclick="setSunsetMode(!sunsetMode)" title="太陽/月を切り替え" aria-label="太陽/月を切り替え">☾ 月</button>
       <!-- 地図上部：被写体追加ボタン -->
       <div id="map-subject-btn" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:500;">
         <button id="btn-map-add-subject" onclick="startAddSubject()"
@@ -1043,7 +1039,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
       font-family:'Space Mono',monospace;font-size:9px;color:var(--ac);cursor:pointer;
       -webkit-tap-highlight-color:transparent;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
       padding:0 6px;">登録対象 ▾</button>
-    <button id="mob-btn-landmark" onclick="openMobSubjectPopup('landmark')"
+    <button id="mob-btn-landmark" class="sm-admin-only" onclick="openMobSubjectPopup('landmark')"
       style="flex:1;height:23px;background:var(--sur2);border:1px solid var(--ac);border-radius:4px;
       font-family:'Space Mono',monospace;font-size:9px;color:var(--ac);cursor:pointer;
       -webkit-tap-highlight-color:transparent;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
@@ -1147,8 +1143,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
       <button class="hk-btn" onclick="npInput('1')">1</button>
       <button class="hk-btn" onclick="npInput('2')">2</button>
       <button class="hk-btn" onclick="npInput('3')">3</button>
-      <button class="hk-btn hk-del" onclick="npInput('DEL')">⌫</button>
+      <button class="hk-btn" id="np-key-neg" onclick="npInput('-')">−</button>
       <button class="hk-btn" onclick="npInput('0')">0</button>
+      <button class="hk-btn" id="np-key-dot" onclick="npInput('.')">.</button>
+      <button class="hk-btn hk-del" onclick="npInput('DEL')">⌫</button>
+      <button class="hk-btn" onclick="npInput('OK')" style="visibility:hidden;"></button>
       <button class="hk-btn hk-ok" onclick="npInput('OK')">OK</button>
     </div>
     <div id="np-range" style="font-family:'Space Mono',monospace;font-size:9px;color:var(--sub);margin-top:8px;"></div>
@@ -1199,7 +1198,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
     <p style="font-size:9px;color:var(--sub);margin-bottom:12px;line-height:1.6;">起動方法を選択してください。</p>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">
       <button class="pb" onclick="openGoogleEarthWeb()">🌐 Google Earth Web（ブラウザ）</button>
-      <button class="pb" onclick="closeModal('modal-ge');openKmlAuthModal('downloadPortraitKmz');" style="position:relative;">
+      <button class="pb" onclick="closeModal('modal-ge');downloadPortraitKmz();" style="position:relative;">
         📥 Google Earth Pro用ファイルダウンロード
         <span style="font-size:8px;color:var(--sub);display:block;">撮影地・対象・天体配置のマーカー付き</span>
       </button>
@@ -1277,18 +1276,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
       <label>地面標高</label>
       <div id="subject-elev-disp" style="font-size:10px;color:var(--ac2);padding:3px 0;">取得中…</div>
     </div>
-    <div class="ig" id="subject-height-row" style="display:none;margin-bottom:8px;">
-      <label>建物高さ [m] <span style="color:var(--ac);">※必須</span></label>
-      <input type="number" id="inp-subject-height" placeholder="例：103" min="1" max="2000"
-        style="background:var(--sur2);border:1px solid var(--bd);border-radius:4px;
-        padding:6px 8px;color:var(--tx);font-family:'Space Mono',monospace;font-size:11px;width:100%;outline:none;">
-    </div>
-    <div class="ig" id="subject-width-row" style="display:none;margin-bottom:8px;">
-      <label>幅 [m]　※任意</label>
-      <input type="number" id="inp-subject-width" placeholder="デフォルト: 10" min="1" max="5000"
-        style="background:var(--sur2);border:1px solid var(--bd);border-radius:4px;
-        padding:6px 8px;color:var(--tx);font-family:'Space Mono',monospace;font-size:11px;width:100%;outline:none;">
-    </div>
     <div class="ig" id="subject-shape-row" style="display:none;margin-bottom:8px;">
       <label>形状</label>
       <select id="inp-subject-shape" onchange="onSubjectShapeChange()"
@@ -1299,6 +1286,18 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
         <option value="cone">円錐</option>
         <option value="frustum">円錐台</option>
       </select>
+    </div>
+    <div class="ig" id="subject-height-row" style="display:none;margin-bottom:8px;">
+      <label>建物高さ [m] <span style="color:var(--ac);">※必須</span></label>
+      <input type="number" id="inp-subject-height" placeholder="例：103" min="1" max="2000"
+        style="background:var(--sur2);border:1px solid var(--bd);border-radius:4px;
+        padding:6px 8px;color:var(--tx);font-family:'Space Mono',monospace;font-size:11px;width:100%;outline:none;">
+    </div>
+    <div class="ig" id="subject-width-row" style="display:none;margin-bottom:8px;">
+      <label>底面幅 [m]　※任意</label>
+      <input type="number" id="inp-subject-width" placeholder="デフォルト: 10" min="1" max="5000"
+        style="background:var(--sur2);border:1px solid var(--bd);border-radius:4px;
+        padding:6px 8px;color:var(--tx);font-family:'Space Mono',monospace;font-size:11px;width:100%;outline:none;">
     </div>
     <div class="ig" id="subject-topwidth-row" style="display:none;margin-bottom:8px;">
       <label>上面幅 [m]</label>
@@ -1320,6 +1319,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
         <option value="270">西 (W)</option>
         <option value="315">北西 (NW)</option>
       </select>
+    </div>
+    <div class="ig" id="subject-offset-row" style="margin-bottom:12px;">
+      <label>オフセット [m]　※任意　ビル屋上等、地面より高い（低い）位置に対象を置く場合に使用</label>
+      <input type="number" id="inp-subject-offset" placeholder="0" step="0.1" value="0"
+        style="background:var(--sur2);border:1px solid var(--bd);border-radius:4px;
+        padding:6px 8px;color:var(--tx);font-family:'Space Mono',monospace;font-size:11px;width:100%;outline:none;">
     </div>
     <div style="display:flex;gap:6px;">
       <button class="pb" onclick="cancelAddSubject()" style="flex:1;">キャンセル</button>
@@ -1461,23 +1466,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
   </div>
 </div>
 
-<!-- KMLパスワード認証モーダル -->
-<div id="modal-kml-auth" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;">
-  <div style="background:var(--sur);border:1px solid var(--bd);border-radius:10px;padding:24px 20px;width:280px;max-width:90vw;text-align:center;">
-    <div style="font-family:'Space Mono',monospace;font-size:12px;font-weight:700;color:var(--ac);margin-bottom:12px;">🔒 KMZダウンロード</div>
-    <p style="font-size:10px;color:var(--sub);margin-bottom:14px;line-height:1.6;">パスワードを入力してください</p>
-    <input id="kml-pw-input" type="password" placeholder="パスワード"
-      style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--bd);border-radius:6px;color:var(--tx);font-family:'Space Mono',monospace;font-size:14px;padding:8px 10px;margin-bottom:10px;outline:none;"
-      onkeydown="if(event.key==='Enter')checkKmlPW()">
-    <div id="kml-pw-err" style="font-size:10px;color:#e87;min-height:14px;margin-bottom:10px;"></div>
-    <div style="display:flex;gap:8px;justify-content:center;">
-      <button onclick="checkKmlPW()"
-        style="flex:1;background:var(--ac);border:none;border-radius:6px;color:#10131c;font-family:'Space Mono',monospace;font-size:11px;font-weight:700;padding:8px;cursor:pointer;">確認</button>
-      <button onclick="document.getElementById('modal-kml-auth').style.display='none';document.getElementById('kml-pw-input').value='';document.getElementById('kml-pw-err').textContent='';"
-        style="flex:1;background:var(--sur2);border:1px solid var(--bd);border-radius:6px;color:var(--tx);font-family:'Space Mono',monospace;font-size:11px;padding:8px;cursor:pointer;">閉じる</button>
-    </div>
-  </div>
-</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-geosearch@3.11.1/dist/geosearch.umd.js"></script>
@@ -1604,7 +1592,11 @@ function refreshLandmarkSelect(){
   sels.forEach(sel=>{ sel.innerHTML=html; sel.value=currentLandmarkBuildingId||''; }); // 状態変数のみを正
 }
 // 固有建物を選択（通常被写体とは排他。地図移動・マーカー・距離/方位/仰角/天体APIへ接続。精密シルエットは未接続＝仮形状box）
+// Admin判定（表示制御用の参照ヘルパ。正本はサーバー app-start の isAdmin）
+function smIsAdmin(){ return window.SM_IS_ADMIN === true; }
+
 function selectLandmarkBuilding(id){
+  if(!smIsAdmin()) return; // 固有建物は Admin 専用（UI非表示に加え、全経路の最終ガード）
   const b=LANDMARK_BUILDINGS[id];
   if(!b) return;
   currentLandmarkBuildingId=id;
@@ -1612,11 +1604,6 @@ function selectLandmarkBuilding(id){
   const ps=document.getElementById('sel-subject'); if(ps) ps.value='';
   refreshSubjectSelects();                             // ボタン表示・編集ボタン状態を更新
   refreshLandmarkSelect();                             // 固有建物selectのvalue同期
-  // 対象標高±は撮影セッション補正としてプリセット対象にも適用。対象切替で0にリセット
-  targetOffset=0;
-  [document.getElementById('subject-offset-ui'),
-   document.querySelector('#mob-drawer-content #subject-offset-ui')].forEach(el=>{ if(el) el.style.display=''; });
-  document.querySelectorAll('[id="subject-offset-disp"]').forEach(el=>{ el.textContent='+0m'; });
   if(map){
     if(subjectMarker){ map.removeLayer(subjectMarker); subjectMarker=null; }   // 排他：被写体マーカー除去
     if(landmarkMarker){ map.removeLayer(landmarkMarker); landmarkMarker=null; }
@@ -1653,7 +1640,7 @@ function onLandmarkBuildingChange(sourceEl){
     updateDrawerIfOpen();
   }
 }
-let targetOffset = 0;   // 対象標高オフセット(m) 撮影セッション専用・保存対象/プリセットを書き換えない
+// targetOffset（撮影セッションの対象標高補正）は廃止。オフセットは対象データ(elevOffset)へ一本化。
 let subjectMarker = null; // 地図上の被写体マーカー
 let landmarkMarker = null; // 地図上の固有建物マーカー（被写体マーカーとは別カテゴリ・固定・非interactive）
 function _landmarkMapIcon(b){
@@ -1686,9 +1673,8 @@ function saveSubjects(){
 function curSubject(){
   return subjects.find(s=>s.id===curSubjectId)||null;
 }
-// 被写体のtotal標高 = 地表標高 + 立ち位置オフセット
+// 被写体のtotal標高 = 地表標高 + オフセット（全種別。対象データとして保存・未設定=0で後方互換）
 function subjectTotalElev(s){
-  if(s.type === 'building') return (s.elev||0);
   return (s.elev||0) + (s.elevOffset||0);
 }
 // 被写体の頂点標高 = total標高 + 高さ
@@ -1713,6 +1699,7 @@ function subjectAsT(s){
     sunsetOk: true,
     silhouette: isBuilding ? (s.shape||'cylinder') : 'portrait',
     frontAz: isBuilding ? (s.frontAz||0) : 0,
+    topWidth: isBuilding ? (s.topWidth||0) : 0, // 円錐台の上面幅（未保存データは0=従来どおり円錐相当）
   };
 }
 // 現在選択中の被写体を計算対象形式へ（既存動作維持：subjectAsT(curSubject())の薄いラッパー）
@@ -1738,9 +1725,9 @@ function resolveTargetT(targetKey){
 // 短縮エイリアス（旧T[cur]の置き換え）
 function _ct(){
   const lb=currentLandmarkBuilding();
-  if(lb){ const v=getBuildingTargetView(lb.id); if(v) v.elev=(v.elev||0)+targetOffset; return v; } // 固有建物選択時（被写体とは排他）＋撮影セッションの対象標高補正
+  if(lb){ return getBuildingTargetView(lb.id); } // 固有建物選択時（被写体とは排他）
   const t=curSubjectAsT();
-  if(t){ t.elev=(t.elev||0)+targetOffset; return t; } // 登録対象＋撮影セッションの対象標高補正
+  if(t){ return t; } // 登録対象（elevはsubjectTotalElevでelevOffset反映済み）
   return {name:'—',lat:35,lng:135,elev:0,h:1.6,physW:0.5,horizonRatio:0.75,topLimitRatio:null,sunsetOk:true,silhouette:'portrait',frontAz:0};
 }
 
@@ -3210,39 +3197,6 @@ function importSharedSpot(){
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// KMZ パスワード認証
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const _KH = '2224512ef44a62e580bb1c0dcb33aff688f4e7da8a488aeb4e7ca402c5cacf45';
-let _kmlPendingFn = null;
-
-function openKmlAuthModal(fnName){
-  if(sessionStorage.getItem('kmlAuth')==='1'){
-    window[fnName](); return;
-  }
-  _kmlPendingFn = fnName;
-  document.getElementById('kml-pw-input').value='';
-  document.getElementById('kml-pw-err').textContent='';
-  document.getElementById('modal-kml-auth').style.display='flex';
-  setTimeout(()=>document.getElementById('kml-pw-input').focus(),100);
-}
-
-async function checkKmlPW(){
-  const v = document.getElementById('kml-pw-input').value;
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));
-  const hex = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-  if(hex === _KH){
-    sessionStorage.setItem('kmlAuth','1');
-    document.getElementById('modal-kml-auth').style.display='none';
-    document.getElementById('kml-pw-input').value='';
-    if(_kmlPendingFn) window[_kmlPendingFn]();
-  } else {
-    document.getElementById('kml-pw-err').textContent='パスワードが違います';
-    document.getElementById('kml-pw-input').value='';
-    setTimeout(()=>document.getElementById('kml-pw-err').textContent='',2000);
-  }
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GOOGLE EARTH KMZ 補助関数
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function drawMoonIconYellowDataURL(size,age,tiltRad){
@@ -3328,7 +3282,7 @@ async function downloadPortraitKmz(){
   const lb=currentLandmarkBuilding();       // プリセット選択中ならその建物、なければnull
   const isPreset=!!lb;                       // プリセット対象か（ワイヤーフレーム省略の分岐に使用）
   const subj=isPreset?null:curSubject();     // 登録対象のワイヤーフレーム生成にのみ使用
-  const t=_ct();                             // 現在対象（_ct().elevはtargetOffset反映済み・再加算しない）
+  const t=_ct();                             // 現在対象（_ct().elevはelevOffset反映済み・再加算しない）
   const tName=t.name||'被写体';
 
   const ds=document.getElementById('idate').value;
@@ -3338,8 +3292,8 @@ async function downloadPortraitKmz(){
 
   const camElev=sElev;
   const targetLat=t.lat, targetLng=t.lng;
-  const targetTopAlt=(t.elev||0)+(t.h||0);   // 対象上端＝足元(targetOffset込)＋高さ
-  const targetBaseAlt=(t.elev||0);           // 対象足元(targetOffset込)。二重加算しない
+  const targetTopAlt=(t.elev||0)+(t.h||0);   // 対象上端＝足元(elevOffset込)＋高さ
+  const targetBaseAlt=(t.elev||0);           // 対象足元(elevOffset込)。二重加算しない
   const distKm=hav(sLat,sLng,targetLat,targetLng);
   const targetAzRaw=brng(sLat,sLng,targetLat,targetLng);
   // 視点オフセット（8方向パッド）をカメラの実方位に反映（プレビューと同じ「実際に振った」見え方）
@@ -3519,7 +3473,9 @@ async function downloadPortraitKmz(){
   const virtRatio=Math.tan(fovDegReal_t1/2*Math.PI/180)/Math.tan(fovLimit/2*Math.PI/180);
   let virtLat=sLat,virtLng=sLng,virtElev=camElev,virtTilt=camTilt;
   let fovSizeX_t2=fovSizeX_t1,fovSizeY_t2=fovSizeY_t1;
-  let virtMoveH=0; // ツアー2カメラの実際の前進量（bodyDistKmT2計算用）
+  let virtMoveH=0; // ツアー2カメラの実際の水平前進量
+  let virtMoveM=0; // ツアー2カメラの実際の3D前進量 moveM（サイズ式は3D量を直接用いる）
+  let virtClamped=false; // 前進量が制約（枠・対象距離50%）でクランプされたか
   if(virtRatio<1){
     // 修正6: 2制約（枠制約・対象距離50%）の最小値
     const moveFovFrame=dist3dM*(1-Math.max(fovSizeX_t1,fovSizeY_t1));
@@ -3528,6 +3484,8 @@ async function downloadPortraitKmz(){
     const moveH=moveM*Math.cos(alphaRad);
     const moveV=moveM*Math.sin(alphaRad);
     virtMoveH=moveH; // ブロック外で参照可能に
+    virtMoveM=moveM;
+    virtClamped=(moveM < dist3dM*(1-virtRatio) - 1e-9); // 理想前進量に届かなかったか
     [virtLat,virtLng]=destPoint(sLat,sLng,targetAz,moveH/1000);
     virtElev=camElev+moveV;
     // 修正7: virtTiltを90+alphaCam_t1に統一
@@ -3539,9 +3497,84 @@ async function downloadPortraitKmz(){
     fovSizeY_t2=fovSizeY_t1*scaleT2;
   }
   // ツアー2用月モデルのScale（人物との視角比をツアー1と同じに維持）
-  const bodyDistKmT2 = bodyDistKm - virtMoveH/1000;
-  const distRatioT2 = virtMoveH>0 ? distKm/(distKm - virtMoveH/1000) : 1; // 人物の見かけ拡大率
-  const bodySizeM_t2 = 2*bodyDistKmT2*1000*Math.tan(angDiamDeg/2*Math.PI/180)*distRatioT2;
+  // ── ツアー2用天体配置（A方式・課題3 / P0修正）──
+  // ツアー2の目的は「Tour1（撮影地点）の構図の相似拡大」。カメラを光軸方向へ前進すると、
+  // 有限距離の対象は透視の必然として「光軸（heading=targetAz / tilt由来のalphaCam_t1）を中心に
+  // 画面上で tan 空間 magT 倍」へ拡大される（GEのCamera描画=透視射影）。
+  // よって天体は『virtから見た方位・高度をAPI値に一致』させるのではなく、
+  // 『光軸相対角の tan を magT 倍した方向』へ配置しなければ、対象との相対位置が保てない
+  // （API値据え置きの旧方式は、対象だけ拡大され太陽/月へ食い込む実機不一致の原因だった）。
+  // 幾何のみで導出した相似変換であり、経験的補正値は含まない。ツアー1側は不変。
+  const bodyDistKmT2 = bodyDistKm;
+  const curvM_t2 = (bodyDistKmT2*1000)**2/(2*6371000);
+  // 相似倍率 magT = D/(D−moveM)（3D前進量を直接使用。非クランプ時 = 1/virtRatio）
+  const magT = (virtRatio<1) ? (dist3dM/(dist3dM - virtMoveM)) : 1;
+  // ── 対象頂部アンカー（P0残差修正）──
+  // GEは地球曲率で描画するため、距離dの地物は見かけ仰角が d/(2R) rad 沈む（大気屈折は描画されない）。
+  // この沈み込みは d に比例し光軸相似（×magT）に従わないため、単純な tan×magT では
+  // Tour2で対象だけが相似予測より浮き上がり、残差 (magT·d1−d2)/(2R)（実機で太陽径の5〜15%）が生じる。
+  // そこで垂直方向は「両カメラから見た対象頂部の実方向（曲率込み・純幾何）」にアンカーした相似
+  //   tan(altV−ax) = tan(e2−ax) + magT·( tan(alt−ax) − tan(e1−ax) )
+  // で配置する。曲率→0 で従来の tan×magT に厳密に還元される（経験的補正値なし）。
+  // 方位は曲率の影響を受けないため従来どおり。
+  const _d1m=distKm*1000, _d2m=_d1m-virtMoveH;
+  const _axRad=alphaCam_t1*Math.PI/180;
+  const anchorE1=Math.atan((targetTopAlt-camElev)/_d1m-_d1m/(2*6371000));
+  const anchorE2=Math.atan((targetTopAlt-virtElev)/_d2m-_d2m/(2*6371000));
+  const tipTan1=Math.tan(anchorE1-_axRad), tipTan2=Math.tan(anchorE2-_axRad);
+  const positions_t2 = steps.map(s_=>{
+    // 光軸相対角（方位は -180..180 正規化）。±80°クランプは tan の特異点回避
+    // （前後8分の太陽/月は光軸から数度以内であり実用域では作用しない・補正値ではない）
+    let dAz=((s_.az-targetAz+540)%360)-180;
+    let dAlt=s_.alt-alphaCam_t1;
+    dAz=Math.max(-80,Math.min(80,dAz));
+    dAlt=Math.max(-80,Math.min(80,dAlt));
+    const azV=targetAz+Math.atan(magT*Math.tan(dAz*Math.PI/180))*180/Math.PI;
+    const yTan=tipTan2+magT*(Math.tan(dAlt*Math.PI/180)-tipTan1);
+    const altV=alphaCam_t1+Math.atan(yTan)*180/Math.PI;
+    const [bLat,bLng]=destPoint(virtLat,virtLng,azV,bodyDistKmT2);
+    const bAlt=bodyDistKmT2*1000*Math.tan(altV*Math.PI/180)+virtElev+curvM_t2;
+    return {lat:bLat,lng:bLng,altitude:bAlt,azV,altV};
+  });
+  // ── サイズ（C: 対象と天体の相対サイズ比を本体①と一致させる）──
+  // 本体①（実画角 f_r）に対する、ツアー2（FOV=fovLimit・残距離 D−moveM）での
+  // 「実在対象の表示倍率」は k_T = virtRatio·D/(D−moveM)（D=dist3dM、3D前進量を直接使用）。
+  // virt から距離 R に置く天体モデルの表示倍率を k_T と厳密一致させるサイズは
+  //   S = 2R·tan(δ/2) · magT,  magT = D/(D−moveM)
+  // （導出: k_B = [S/(2R·tan(δ/2))]·virtRatio に S を代入すると k_B = virtRatio·magT = k_T）。
+  // 非クランプ（moveM = D(1−virtRatio)）では magT=1/virtRatio → k_T=k_B=1 で本来の等価表示。
+  // クランプ時は全体が共通縮小率 shortScale=virtRatio·magT(<1) で小さくなるが、
+  // 対象:天体の相対サイズ・重なり位置は本体①と一致する（実撮影画角は枠線が示す）。
+  // ※FOV を fovLimit 未満へ下げる方式は GE の実用最小画角を下回るため採らない。
+  const shortScale = virtRatio<1 ? virtRatio*magT : 1; // 対象・天体に共通の縮小率（検証用）
+  const bodySizeM_t2 = 2*bodyDistKmT2*1000*Math.tan(angDiamDeg/2*Math.PI/180)*magT;
+  // ── 検証用中間値（P0の幾何条件をコンソールで確認可能にする。UI/出力に影響なし）──
+  // 正条件: virt→天体の実方向が「光軸相対 tan を magT 倍した相似方向」に一致すること。
+  // 配置座標から実方向を逆算し、相似式による期待方向との最大誤差を格納する。
+  try{
+    let _maxAzErr=0,_maxAltErr=0;
+    positions_t2.forEach((p2,i)=>{
+      const azBack=brng(virtLat,virtLng,p2.lat,p2.lng);
+      const altBack=Math.atan((p2.altitude-virtElev-curvM_t2)/(bodyDistKmT2*1000))*180/Math.PI;
+      let dAz=Math.abs(azBack-p2.azV)%360; if(dAz>180)dAz=360-dAz;
+      const dAlt=Math.abs(altBack-p2.altV);
+      if(dAz>_maxAzErr)_maxAzErr=dAz;
+      if(dAlt>_maxAltErr)_maxAltErr=dAlt;
+    });
+    // 対象/天体の表示倍率（本体①基準）。天体側は実装値 bodySizeM_t2 から独立に逆算して突合する。
+    const _kT = (virtRatio<1) ? (virtRatio*dist3dM/(dist3dM-virtMoveM)) : 1;
+    const _kB = (virtRatio<1)
+      ? (bodySizeM_t2/(2*bodyDistKmT2*1000*Math.tan(angDiamDeg/2*Math.PI/180)))*virtRatio
+      : 1;
+    window.__smKmzDebug={
+      virtRatio, moveM:virtMoveM, moveH:virtMoveH, clamped:virtClamped,
+      virtLat, virtLng, virtElev, bodyDistKmT2, frames:positions_t2.length,
+      anchorE1Deg:anchorE1*180/Math.PI, anchorE2Deg:anchorE2*180/Math.PI,
+      curvResidDeg:(magT*_d1m-_d2m)/(2*6371000)*180/Math.PI, // rev19式なら残ったはずの曲率残差
+      targetScale:_kT, bodyScale:_kB, scaleDiff:Math.abs(_kT-_kB),
+      shortScale, maxAzErrDeg:_maxAzErr, maxAltErrDeg:_maxAltErr
+    };
+  }catch(e){ /* 検証情報の格納失敗は本処理へ影響させない */ }
 
   // 時刻ラベル座標：ツアー2カメラ正面・画角上部35%位置（virtRatio確定後に計算）
   const fovV_t2_label=2*Math.atan(24/(2*200))*180/Math.PI;
@@ -3765,11 +3798,11 @@ async function downloadPortraitKmz(){
       <Model id="body_model_t2">
         <altitudeMode>absolute</altitudeMode>
         <Location id="body_loc_t2">
-          <longitude>${positions[0].lng}</longitude>
-          <latitude>${positions[0].lat}</latitude>
-          <altitude>${positions[0].altitude}</altitude>
+          <longitude>${positions_t2[0].lng}</longitude>
+          <latitude>${positions_t2[0].lat}</latitude>
+          <altitude>${positions_t2[0].altitude}</altitude>
         </Location>
-        <Orientation id="body_ori_t2"><heading>${(((brng(positions[0].lat, positions[0].lng, sLat, sLng)-90)+360)%360).toFixed(1)}</heading><tilt>0</tilt><roll>0</roll></Orientation>
+        <Orientation id="body_ori_t2"><heading>${(((brng(positions_t2[0].lat, positions_t2[0].lng, virtLat, virtLng)-90)+360)%360).toFixed(1)}</heading><tilt>0</tilt><roll>0</roll></Orientation>
         <Scale><x>${bodySizeM_t2}</x><y>${bodySizeM_t2*1.1458}</y><z>${bodySizeM_t2}</z></Scale>
         <Link><href>${daeFilename}</href></Link>
       </Model>
@@ -3806,13 +3839,17 @@ async function downloadPortraitKmz(){
             <roll>0</roll>
             <gx:horizFov>${fovDeg_t1.toFixed(2)}</gx:horizFov>
           </Camera>
-        </gx:FlyTo>${showFovFrame_t1?`
+        </gx:FlyTo>
         <gx:AnimatedUpdate>
           <gx:duration>0</gx:duration>
           <Update><targetHref></targetHref><Change>
-            <ScreenOverlay targetId="fov_frame_t1"><visibility>1</visibility></ScreenOverlay>
+            <Placemark targetId="time_label"><styleUrl>#time_style</styleUrl></Placemark>
+            <Placemark targetId="body_placemark"><visibility>1</visibility></Placemark>
+            <Placemark targetId="body_placemark_t2"><visibility>0</visibility></Placemark>${fovFrameKml_t2?`
+            <ScreenOverlay targetId="fov_frame_t2"><visibility>0</visibility></ScreenOverlay>`:''}${showFovFrame_t1?`
+            <ScreenOverlay targetId="fov_frame_t1"><visibility>1</visibility></ScreenOverlay>`:''}
           </Change></Update>
-        </gx:AnimatedUpdate>`:''}
+        </gx:AnimatedUpdate>
 `;
 
   for(let i=1;i<positions.length;i++){
@@ -3876,7 +3913,7 @@ async function downloadPortraitKmz(){
             <heading>${targetAz}</heading>
             <tilt>${virtTilt}</tilt>
             <roll>0</roll>
-            <gx:horizFov>10.29</gx:horizFov>
+            <gx:horizFov>${fovLimit.toFixed(2)}</gx:horizFov>
           </Camera>
         </gx:FlyTo>
         <gx:AnimatedUpdate>
@@ -3885,6 +3922,7 @@ async function downloadPortraitKmz(){
             <Placemark targetId="time_label"><styleUrl>#time_style_t2</styleUrl></Placemark>
             <Placemark targetId="body_placemark"><visibility>0</visibility></Placemark>
             <Placemark targetId="body_placemark_t2"><visibility>1</visibility></Placemark>${showFovFrame_t1?`
+            <ScreenOverlay targetId="fov_frame_t1"><visibility>0</visibility></ScreenOverlay>`:''}${fovFrameKml_t2?`
             <ScreenOverlay targetId="fov_frame_t2"><visibility>1</visibility></ScreenOverlay>`:''}
           </Change></Update>
         </gx:AnimatedUpdate>
@@ -3904,16 +3942,16 @@ async function downloadPortraitKmz(){
                 <altitude>${p.altitude.toFixed(2)}</altitude>
               </Location>
               <Location targetId="body_loc_t2">
-                <longitude>${p.lng.toFixed(7)}</longitude>
-                <latitude>${p.lat.toFixed(7)}</latitude>
-                <altitude>${p.altitude.toFixed(2)}</altitude>
+                <longitude>${positions_t2[i].lng.toFixed(7)}</longitude>
+                <latitude>${positions_t2[i].lat.toFixed(7)}</latitude>
+                <altitude>${positions_t2[i].altitude.toFixed(2)}</altitude>
               </Location>
               <Orientation targetId="body_ori">
                 <heading>${(((brng(p.lat, p.lng, sLat, sLng)-90)+360)%360).toFixed(1)}</heading>
                 <tilt>0</tilt><roll>0</roll>
               </Orientation>
               <Orientation targetId="body_ori_t2">
-                <heading>${(((brng(p.lat, p.lng, sLat, sLng)-90)+360)%360).toFixed(1)}</heading>
+                <heading>${(((brng(positions_t2[i].lat, positions_t2[i].lng, virtLat, virtLng)-90)+360)%360).toFixed(1)}</heading>
                 <tilt>0</tilt><roll>0</roll>
               </Orientation>
               <Placemark targetId="time_label">
@@ -4177,11 +4215,16 @@ async function onPick(){
 }
 
 let _lastDistLabel='';
+// 操作パネル内オフセット値の共通色規則（8-1）: 0以上=黄 / 負=ピンク
+function _ofsUiColor(v){ return v>=0 ? 'var(--ac)' : '#f88'; }
+
 function updateElevDisplay(){
   // 標高オフセットの現在値を表示（PC/mob複製に効く属性セレクタ）
+  // 操作UI共通の色規則（8-1）: 0以上=黄(var(--ac)) / 負=ピンク(#f88)。
+  // 初期・リセット・操作経路によらず同一値は同一色（地図上ラベルは別体系のため適用しない）
   document.querySelectorAll('[id="elev-offset-disp"]').forEach(el=>{
     el.textContent=`${elevOffset>=0?'+':''}${elevOffset}m`;
-    el.style.color = elevOffset===0 ? 'var(--sub)' : (elevOffset>0 ? 'var(--ac)' : '#f88');
+    el.style.color = _ofsUiColor(elevOffset);
   });
   // オフセット併記（0のときは非表示）: 04撮影地点=「228m +4m」形式 / 地図マーカー=「E:228m +4m」形式
   const ofsTxt = elevOffset!==0 ? `${elevOffset>0?'+':''}${elevOffset}m` : '';
@@ -4205,7 +4248,8 @@ function restorePinTarget(pin){
   if(!tk) return {status:'none', kind:''}; // 旧Pin/空 → 現在の対象選択を維持
   try{
     if(tk.indexOf('building:')===0){
-      if(LANDMARK_BUILDINGS[tk]){ selectLandmarkBuilding(tk); return {status:'restored', kind:'landmark'}; }
+      // 固有建物は Admin 専用。非Adminは保存済みPinからも復元させない（既存missingと同じ穏当な扱い）
+      if(smIsAdmin() && LANDMARK_BUILDINGS[tk]){ selectLandmarkBuilding(tk); return {status:'restored', kind:'landmark'}; }
     } else {
       if(subjects.find(s=>s.id===tk)){ selectSubject(tk); return {status:'restored', kind:'subject'}; }
     }
@@ -4244,13 +4288,6 @@ function shiftElevOffset(v,reset=false){
 }
 
 // ━━ 被写体高さオフセット ━━
-function shiftSubjectOffset(v, reset=false){
-  // 撮影セッション専用の対象標高補正。登録対象/プリセットの保存値は書き換えない（_ct()で加算）
-  targetOffset = reset ? 0 : (targetOffset + v);
-  document.querySelectorAll('[id="subject-offset-disp"]').forEach(el=>{ el.textContent=(targetOffset>=0?'+':'')+targetOffset+'m'; });
-  if(sLat!==null) onPick();
-  updateDrawerIfOpen();
-}
 
 // ━━ 被写体登録UI ━━
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2); }
@@ -4323,6 +4360,7 @@ function onSubjectChange(sourceEl){
 
 // スマホポップアップ（花火プランナー準拠：buttonタグ・tap-highlight対応）
 function openMobSubjectPopup(mode){
+  if(mode==='landmark' && !smIsAdmin()) return; // 固有建物ポップアップは Admin 専用
   closeMapMenu(); // 競合防止
   closeFocalPad(); closeRidgePopup(); closeOfsPopup(); // 競合防止：他ポップアップを閉じる
   const m = (mode==='landmark') ? 'landmark' : 'subject'; // 既定は登録対象
@@ -4403,6 +4441,7 @@ function closeMobSubjectPopup(){
 function _pcTargetCsd(kind){ const p=document.getElementById('pnl'); return p ? p.querySelector(`.target-csd[data-target-csd="${kind}"]`) : null; }
 function closeAllTargetCsd(){ const p=document.getElementById('pnl'); if(!p) return; p.querySelectorAll('.target-csd.open').forEach(el=>el.classList.remove('open')); }
 function renderTargetCsd(kind){
+  if(kind==='landmark' && !smIsAdmin()) return; // 固有建物CSDは Admin 専用
   const csd=_pcTargetCsd(kind); if(!csd) return;
   const menu=csd.querySelector('.target-csd-menu'); if(!menu) return;
   let html='', groups=[], openPref=null;
@@ -4461,6 +4500,7 @@ function renderTargetCsd(kind){
   });
 }
 function toggleTargetCsd(kind){
+  if(kind==='landmark' && !smIsAdmin()) return; // 固有建物CSDは Admin 専用
   const csd=_pcTargetCsd(kind); if(!csd) return;
   const isOpen=csd.classList.contains('open');
   closeAllTargetCsd(); // 2メニュー同時open不可
@@ -4589,6 +4629,8 @@ async function openAddSubjectModal(lat, lng){
   document.getElementById('inp-subject-height').value='';
   document.getElementById('inp-subject-width').value='';
   document.getElementById('inp-subject-shape').value='cylinder';
+  document.getElementById('inp-subject-topwidth').value='';
+  document.getElementById('inp-subject-offset').value=0;
   document.getElementById('inp-subject-frontaz').value='0';
   document.getElementById('btn-subject-delete').style.display='none';
   document.getElementById('subject-elev-disp').textContent='取得中…';
@@ -4618,6 +4660,9 @@ function onSubjectShapeChange(){
   const shape=document.getElementById('inp-subject-shape').value;
   const showAz=(type==='building' && shape==='box');
   document.getElementById('subject-frontaz-row').style.display=showAz?'':'none';
+  // 円錐台のみ上面幅を独立入力可能（topWidth>=0。底面幅を超える値も許可＝逆円錐台）
+  const showTopW=(type==='building' && shape==='frustum');
+  document.getElementById('subject-topwidth-row').style.display=showTopW?'':'none';
 }
 
 function openEditSubject(){
@@ -4632,6 +4677,8 @@ function openEditSubject(){
   document.getElementById('inp-subject-height').value=s.h||'';
   document.getElementById('inp-subject-width').value=s.physW||'';
   document.getElementById('inp-subject-shape').value=s.shape||'cylinder';
+  document.getElementById('inp-subject-topwidth').value=(s.topWidth===undefined||s.topWidth===null)?'':s.topWidth;
+  document.getElementById('inp-subject-offset').value=(s.elevOffset===undefined||s.elevOffset===null)?0:s.elevOffset;
   document.getElementById('inp-subject-frontaz').value=String(s.frontAz||0);
   document.getElementById('subject-elev-disp').textContent=`${(s.elev||0).toFixed(1)} m`;
   document.getElementById('subject-elev-disp').dataset.elev=s.elev||0;
@@ -4661,8 +4708,16 @@ function saveSubjectFromModal(){
     const shape=document.getElementById('inp-subject-shape').value||'cylinder';
     const frontAz=parseInt(document.getElementById('inp-subject-frontaz').value)||0;
     extra={h, physW, shape, frontAz};
+    // 円錐台の上面幅（制約は topWidth>=0 のみ。0=円錐相当・底面同値=円柱相当・底面超=逆円錐台も許可）
+    // frustum 以外へ形状変更した場合は undefined を代入し、保存(JSON)から自然に消す（後方互換維持）
+    const twRaw=parseFloat(document.getElementById('inp-subject-topwidth').value);
+    extra.topWidth=(shape==='frustum') ? Math.max(0, isNaN(twRaw)?0:twRaw) : undefined;
   }
-  // 非建物(登録対象)は保存されたelevOffsetを維持（モーダルでは編集しない・撮影補正はtargetOffsetで別管理）
+  // オフセット（全種別・対象データとして保存。HANABIのelevOffsetと同方式）
+  {
+    const ofRaw=parseFloat(document.getElementById('inp-subject-offset').value);
+    extra.elevOffset=Math.round((isNaN(ofRaw)?0:ofRaw)*10)/10;
+  }
 
   if(_editingSubjectId){
     const s=subjects.find(x=>x.id===_editingSubjectId);
@@ -5802,8 +5857,13 @@ async function _prefetchFallback(srcIdx,keys,btns,phase){
   await _prefetchTiles(nextIdx,need,btns,phase);
   await _prefetchFallback(nextIdx,[...need],btns,phase); // さらに粗い側へ再帰
 }
+// 対象（登録対象/固有建物）が選択済みか（稜線取得ガード用。_ct()のフォールバック前段と同じ判定）
+function smHasTarget(){ return !!(currentLandmarkBuilding()||curSubjectAsT()); }
+
 async function fetchRidgeNear(){
-  if(sLat===null||sLng===null){ alert('先にロケ地（撮影地点）を設定してください'); return; }
+  // 撮影地点＋対象が揃うまで完全no-op（警告・toast・loading・取得系処理を一切発生させない）
+  if(sLat===null||sLng===null) return;
+  if(!smHasTarget()) return;
   const btns=document.querySelectorAll('[id="btn-ridge-near"]');
   btns.forEach(b=>{b.disabled=true;b.textContent='取得中…';});
   try{
@@ -5832,7 +5892,9 @@ async function fetchRidgeNear(){
   }
 }
 async function fetchRidgeFar(){
-  if(sLat===null||sLng===null){ alert('先にロケ地（撮影地点）を設定してください'); return; }
+  // 撮影地点＋対象が揃うまで完全no-op（警告・toast・loading・取得系処理を一切発生させない）
+  if(sLat===null||sLng===null) return;
+  if(!smHasTarget()) return;
   const btns=document.querySelectorAll('[id="btn-ridge-far"]');
   btns.forEach(b=>{b.disabled=true;b.textContent='取得中…';});
   try{
@@ -5863,6 +5925,9 @@ function cycleRidgeDist(){
 function cycleRidgeTreeH(){
   gRidgeTreeH=gRidgeTreeH===20?0:(gRidgeTreeH===0?5:(gRidgeTreeH===5?10:20));
   document.querySelectorAll('[id="btn-ridge-tree"]').forEach(b=>b.textContent='木'+gRidgeTreeH+'m');
+  // 対象未設定時は設定値・ボタン表示の更新のみ（稜線は対象ありでしか取得できないため破棄対象も無く、
+  // 再描画を発火させない＝方角・ダイアグラムを一切動かさない）
+  if(!smHasTarget()) return;
   // 樹高が変わったら既存の稜線は無効（hanabiと同じ思想で破棄→再取得を促す）
   clearRidgeline();
   if(typeof _triggerPvRedraw==='function') _triggerPvRedraw();
@@ -8034,7 +8099,6 @@ function saveSpot(){
     orientation:compMode,
     tripodH,
     elevOffset,
-    targetOffset,  // per-spotスナップショット：撮影セッションの対象標高補正（登録/プリセット共通）
     groundElev:sElevGround,                     // S-1: 標高通常管理の復元用
     sunsetMode,
     pvAzOfs,
@@ -8071,8 +8135,9 @@ function loadSpot(idx){
   const tk = spot.targetKey;
   if(tk){
     if(tk.indexOf('building:')===0){
-      if(LANDMARK_BUILDINGS[tk]) selectLandmarkBuilding(tk);
-      else showHint('保存時のプリセット対象が見つかりません（対象未選択で読み込みました）。');
+      // 固有建物は Admin 専用。非Adminには存在を示唆しない汎用文言で対象未選択のまま読み込む
+      if(smIsAdmin() && LANDMARK_BUILDINGS[tk]) selectLandmarkBuilding(tk);
+      else showHint('保存時の対象が見つかりません（対象未選択で読み込みました）。');
     } else {
       if(subjects.find(x=>x.id===tk)) selectSubject(tk);
       else showHint('保存時の登録対象が見つかりません（対象未選択で読み込みました）。');
@@ -8089,17 +8154,8 @@ function loadSpot(idx){
   }
   if(spot.elevOffset!=null) elevOffset=spot.elevOffset;
   if(spot.groundElev!=null){ sElevGround=spot.groundElev; _obsElevOverride=null; } // S-1: 新形式=地面標高＋offset＋現三脚高の通常管理
-  // 対象標高±の per-spot 復元。撮影セッション補正(targetOffset)として復元し、対象データは書き換えない。
-  // selectSubject/selectLandmarkBuilding が先に targetOffset=0 済みなので、その後に保存値を適用する。
-  // 旧spotは subjectOffset キーで保持されているため後方互換で読み取る（対象へは書き戻さない）。
-  {
-    const _to = (spot.targetOffset!=null) ? spot.targetOffset
-              : (spot.subjectOffset!=null ? spot.subjectOffset : null);
-    if(_to!=null){
-      targetOffset=_to;
-      document.querySelectorAll('[id="subject-offset-disp"]').forEach(el=>{ el.textContent=(targetOffset>=0?'+':'')+targetOffset+'m'; }); // PC/スマホ/ドロワー同期
-    }
-  }
+  // 対象標高±（旧targetOffset）は廃止。オフセットは対象データ(elevOffset)側で管理されるため、
+  // 旧spotのtargetOffset/subjectOffset値は復元しない（対象データを書き換えないという旧方針を維持）。
   // センサー復元：保存時点の有効なsensorKeyがある場合のみ既存setSensor()へ委譲
   //（ボタン・情報表示・画角・プレビューはsetSensor内の既存経路で同期。独自DOM更新なし）。
   // sensorKeyなしの旧計画・不正キーは現在選択中のセンサーを維持（フルサイズへ勝手に変更しない）。
@@ -8400,6 +8456,9 @@ function setSunsetMode(v){
   _all('btn-fullmoon').forEach(el=>{el.disabled=v;el.style.opacity=v?'.4':'';el.style.cursor=v?'default':'pointer';});
   _all('btn-fullmoon-clear').forEach(el=>{el.disabled=v;el.style.opacity=v?'.4':'';el.style.cursor=v?'default':'pointer';});
   _all('btn-mooncal').forEach(el=>{el.style.display=v?'none':'';});
+  // 5: 地図上トグル（スマホ）の表示同期。現在の天体が一目で分かる表示にする
+  const mbt=document.getElementById('map-body-toggle');
+  if(mbt){ mbt.textContent=v?'☀ 太陽':'☾ 月'; mbt.style.color=v?'#c8a96e':'#9fb2c8'; }
   // 満月リストをクリア（太陽モード時）
   if(v) _all('fullmoon-list').forEach(el=>{el.innerHTML='';});
   // モード切替時はチャンス一覧もクリア
@@ -8426,13 +8485,6 @@ function selectSubject(id){
   curSubjectId = id;
   refreshSubjectSelects();
   const s = curSubject();
-  // 対象標高±は撮影セッション補正。対象種別に関わらず表示し、対象切替で0にリセット
-  targetOffset=0;
-  [document.getElementById('subject-offset-ui'),
-   document.querySelector('#mob-drawer-content #subject-offset-ui')].forEach(el=>{
-    if(el) el.style.display = '';
-  });
-  document.querySelectorAll('[id="subject-offset-disp"]').forEach(el=>{ el.textContent='+0m'; });
   if(map && s){
     if(landmarkMarker){ map.removeLayer(landmarkMarker); landmarkMarker=null; } // 排他：固有建物マーカー除去
     if(subjectMarker) map.removeLayer(subjectMarker);
@@ -8564,7 +8616,7 @@ function updateDrawerIfOpen(){
 
   // ② innerHTML更新が必要なテキスト表示要素
   ['i-d','i-e','i-a','i-v','t-sr','t-ss','t-mr','t-ms','p-age','p-name',
-   'i-dow','tripod-disp','fn','subject-offset-disp'].forEach(id=>{
+   'i-dow','tripod-disp','fn'].forEach(id=>{
     const s=src.querySelector('#'+id);
     const d=dst.querySelector('#'+id);
     if(s&&d) d.innerHTML=s.innerHTML;
@@ -8724,7 +8776,7 @@ function _mirrorValues(src, dst){
   });
   // テキスト表示系を同期（idで特定できるもの）
   ['i-d','i-e','i-a','i-v','t-sr','t-ss','t-mr','t-ms','p-age','p-name',
-   'i-dow','tripod-disp','fn','subject-offset-disp'].forEach(id=>{
+   'i-dow','tripod-disp','fn'].forEach(id=>{
     const s=src.querySelector('#'+id);
     const d=dst.querySelector('#'+id);
     if(s&&d) d.innerHTML=s.innerHTML;
@@ -10307,6 +10359,11 @@ function openNumericPad(cfg){
   _npCfg=cfg;
   _npBuf=String(cfg.initial());
   _npFresh=true;
+  // 8-4: 呼出元ごとの入力制約（負数・小数第1位）。未指定の既存呼出（三脚高等）は従来どおり整数のみ
+  const kNeg=document.getElementById('np-key-neg');
+  const kDot=document.getElementById('np-key-dot');
+  if(kNeg) kNeg.style.visibility=cfg.allowNegative?'visible':'hidden';
+  if(kDot) kDot.style.visibility=cfg.allowDecimal?'visible':'hidden';
   const t=document.getElementById('np-title');  if(t) t.textContent=cfg.title;
   const r=document.getElementById('np-range');  if(r) r.textContent=cfg.rangeNote;
   _npUpdateDisp();
@@ -10318,25 +10375,42 @@ function closeNumericPad(){
   if(ov) ov.style.display='none';
   _npBuf=''; _npFresh=false; _npCfg=null;
 }
+function _npParse(buf){
+  // 小数許可時は parseFloat（小数第1位へ丸めは確定時）。整数モードは従来どおり parseInt
+  return _npCfg&&_npCfg.allowDecimal ? parseFloat(buf) : parseInt(buf,10);
+}
 function npInput(k){
   if(!_npCfg) return;
   if(k==='DEL'){ _npFresh=false; _npBuf=_npBuf.slice(0,-1); _npUpdateDisp(); return; }
   if(k==='OK'){
-    const n=parseInt(_npBuf,10);
+    let n=_npParse(_npBuf);
     const cfg=_npCfg;
+    if(cfg.allowDecimal&&isFinite(n)) n=Math.round(n*10)/10; // 小数第1位まで
     if(isFinite(n)&&n>=cfg.min()&&n<=cfg.max) cfg.onCommit(n); // 範囲判定は確定時のみ（入力途中は下限未満も許可）
     closeNumericPad(); return;
   }
   if(_npFresh){ _npBuf=''; _npFresh=false; }
+  if(k==='-'){ // 8-4: 先頭のみ・許可時のみ
+    if(!_npCfg.allowNegative) return;
+    if(_npBuf!=='') return;
+    _npBuf='-'; _npUpdateDisp(); return;
+  }
+  if(k==='.'){ // 8-4: 許可時のみ・1個まで（小数第1位運用）
+    if(!_npCfg.allowDecimal) return;
+    if(_npBuf.indexOf('.')>=0) return;
+    if(_npBuf===''||_npBuf==='-') _npBuf+='0';
+    _npBuf+='.'; _npUpdateDisp(); return;
+  }
   if(_npBuf.length>=_npCfg.maxLen) return;
+  if(/\.\d$/.test(_npBuf)) return; // 小数第1位までに制限
   _npBuf+=k;
   _npUpdateDisp();
 }
 function _npUpdateDisp(){
   const el=document.getElementById('np-disp');
   if(!el||!_npCfg) return;
-  const n=parseInt(_npBuf,10);
-  const valid=_npBuf===''||(isFinite(n)&&n>=_npCfg.min()&&n<=_npCfg.max);
+  const n=_npParse(_npBuf);
+  const valid=_npBuf===''||_npBuf==='-'||(isFinite(n)&&n>=_npCfg.min()&&n<=_npCfg.max);
   el.textContent=_npBuf===''?'—':_npBuf+_npCfg.unit;
   el.style.color=valid?'var(--tx)':'#ff6655';
 }
@@ -10366,6 +10440,17 @@ function openTripodPad(){
     },
   });
 }
+// 8-2: 撮影地点オフセット直接入力（既存 numericPad 再利用。確定は既存 shiftElevOffset と同一経路）
+function openElevOffsetPad(){
+  if(sLat===null) return; // 既存ボタンと同条件（地点未設定では変更不可）
+  openNumericPad({
+    title:'撮影地点オフセット (m)', unit:'m', maxLen:6,
+    min:()=>-999, max:999, allowNegative:true, allowDecimal:true,
+    rangeNote:'-999 〜 999 m（小数第1位まで）',
+    initial:()=>elevOffset,
+    onCommit:(n)=>{ shiftElevOffset(n - elevOffset); }, // 差分適用＝既存の状態更新・再計算・再描画へ
+  });
+}
 // 互換ラッパ（既存呼び出し元 openMobSubjectPopup 等から参照）
 function closeFocalPad(){ closeNumericPad(); }
 function closeTripodPad(){ closeNumericPad(); }
@@ -10376,6 +10461,8 @@ document.addEventListener('keydown', function(e){
   if(!ov || ov.style.display!=='block') return;
   let key=null;
   if(e.key>='0'&&e.key<='9') key=e.key;
+  else if(e.key==='-') key='-';
+  else if(e.key==='.') key='.';
   else if(e.key==='Backspace') key='DEL';
   else if(e.key==='Enter') key='OK';
   else if(e.key==='Escape'){ e.preventDefault(); closeNumericPad(); return; }

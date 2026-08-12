@@ -114,6 +114,15 @@
       window.location.href = NO_ENTITLEMENT_URL;
       return false;
     }
+    // 管理者フラグの受け取り（表示制御用）。判定正本はサーバー（app-start の isAdmin =
+    // 既存 requireAdmin と同一式）。応答が読めない・フィールドが無い場合は非管理者扱い（安全側）。
+    try {
+      var body = await res.json();
+      if (body && body.data && body.data.isAdmin === true) {
+        window.SM_IS_ADMIN = true;
+        document.documentElement.classList.add("sm-admin");
+      }
+    } catch (e) { /* 非管理者扱いのまま */ }
     return true;
   }
 
