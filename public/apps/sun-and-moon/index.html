@@ -305,15 +305,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
 /* Leafletコントロールの余白を詰める（右カラムが上から詰まる／HANABI準拠） */
 .leaflet-top .leaflet-control{margin-top:4px;}
 /* 5: スマホ専用の地図上 太陽/月トグル（Leafletズームの下・地図操作を妨げない最小サイズ） */
-/* スマホ地図上の太陽/月切替。左上(ズーム＋検索)と重ならないよう右上へ配置。
-   スマホでは .leaflet-top.leaflet-right が非表示のため右上は空く。safe-area(ノッチ)考慮。 */
-#map-body-toggle{display:none;position:absolute;
-  top:calc(10px + env(safe-area-inset-top));
-  right:calc(10px + env(safe-area-inset-right));left:auto;z-index:500;
-  padding:6px 10px;border:1px solid var(--bd);border-radius:6px;
-  background:var(--sur2);color:var(--ac);font-family:'Space Mono',monospace;
-  font-size:12px;font-weight:700;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,.5);cursor:pointer;}
-@media(max-width:600px){#map-body-toggle{display:block;}}
+/* スマホ地図上の太陽/月切替。PCでは非表示（配置はスマホの @media で既存ボタン群に組み込む）。 */
+#map-body-toggle{ display:none; }
 .leaflet-right .leaflet-control{margin-right:4px;}
 /* 固定表示グループ：地図上の固定ラベル（太陽/月時間の凡例・中央ヒント等）を一元管理。
    上詰め整列の対象外。display:contentsのため各ラベルの表示位置・座標系は完全に現状維持。
@@ -606,6 +599,22 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
     border-radius:7px; cursor:pointer; font-size:16px;
     box-shadow:0 2px 8px rgba(0,0,0,.5);
     -webkit-tap-highlight-color:transparent; user-select:none;
+  }
+  /* 太陽/月切替は衛星ボタン(🛰)と同じ右端縦列に組み込む。
+     衛星の直下(top=8+36+8=52px)へ同幅・同スタイルで積み、既存コントロールと重ならない。
+     衛星/メニュー/対象追加/ズーム/検索のいずれとも非干渉。safe-area(ノッチ・横向き)考慮。 */
+  #map-body-toggle{
+    display:flex !important;
+    position:absolute;
+    top:calc(52px + env(safe-area-inset-top));
+    right:calc(8px + env(safe-area-inset-right)); left:auto; z-index:1000;
+    width:auto; min-width:36px; height:36px; padding:0 8px;
+    align-items:center; justify-content:center; gap:4px;
+    background:var(--sur2); border:1px solid var(--bd); color:var(--ac);
+    border-radius:7px; cursor:pointer;
+    font-family:'Space Mono',monospace; font-size:12px; font-weight:700; line-height:1;
+    box-shadow:0 2px 8px rgba(0,0,0,.5);
+    -webkit-tap-highlight-color:transparent; user-select:none; white-space:nowrap;
   }
 }
 @media (max-width:600px){
