@@ -17,10 +17,10 @@
  */
 
 import { requireUser, AuthError } from "../shared/auth";
-import { AppError, ValidationError } from "../shared/errors";
+import { AppError, ValidationError, DependencyRequiredError } from "../shared/errors";
 import { jsonOk, jsonError } from "../shared/response";
 import { getStripe, StripeConfigError, classifyCreateError } from "../shared/stripe";
-import { precheckMultiCheckout, isProductAvailable } from "../shared/purchase";
+import { precheckMultiCheckout, isProductAvailable, checkProductDependencies, DependencyConfigError } from "../shared/purchase";
 import {
   validateOperationId,
   buildCartKey,
@@ -52,11 +52,21 @@ function toErrorResponse(err: unknown): Response {
   if (err instanceof AuthError) {
     return jsonError(err.code, err.message, err.status);
   }
+  if (err instanceof DependencyRequiredError) {
+    // 依存未充足は details（購入対象コード＋不足前提グループ）を載せてフロントの表示に使わせる。
+    // AppError 継承のため、必ず AppError 分岐より前に処理する。
+    return jsonError(err.code, err.message, err.status, undefined, err.details);
+  }
   if (err instanceof AppError) {
     return jsonError(err.code, err.message, err.status);
   }
   if (err instanceof StripeConfigError) {
     console.error("[purchase] stripe config error:", err.message);
+    return jsonError("INTERNAL_ERROR", "処理中にエラーが発生しました。", 500);
+  }
+  if (err instanceof DependencyConfigError) {
+    // 依存設定の不正（循環・SATISFY_MODE 混在）は内部設定エラー。詳細はログのみ、ブラウザには汎用文言。
+    console.error("[purchase] dependency config error:", err.message);
     return jsonError("INTERNAL_ERROR", "処理中にエラーが発生しました。", 500);
   }
   throw err;
@@ -583,6 +593,51 @@ export function computeAllGranted(products: { granted: boolean }[]): boolean {
  *   }
  * }
  */
+/**
+ * POST /api/purchases/precheck-dependency
+ *
+ * 選択商品の「商品依存条件」だけを Checkout Session を作らずに確認する読み取り専用 API。
+ * STORE の購入内容確認モーダルを出す前に呼び、依存 NG（DEPENDENCY_REQUIRED）を早期に案内するための UX 改善。
+ *
+ * 重要な設計境界:
+ * - これは UX 改善であり、セキュリティ境界にしない。購入実行時の handleCheckout 内
+ *   precheckMultiCheckout の依存チェックは従来どおり必ず実行する（本 API を通さず
+ *   直接 checkout を叩いても依存はサーバーで拒否される）。
+ * - 依存判定は M_PRODUCT_DEPENDENCY 正本の checkProductDependencies をそのまま再利用する
+ *   （HANABI 等の固有条件をここへハードコードしない）。
+ * - Checkout Session を作らない・active checkout を一切変更しない・二重購入防止や販売可否の
+ *   最終判定はここでは行わない（それらは購入実行時の責務）。
+ *
+ * レスポンス:
+ * - 依存 OK: 200 { result: "OK", data: { ok: true } }
+ * - 依存 NG: 409 DEPENDENCY_REQUIRED（フロントは「本体も選択してください」を表示して停止）
+ * - 設定不正（循環 / SATISFY_MODE 混在）: DependencyConfigError → 500（内部詳細は返さない）
+ */
+export async function handlePrecheckDependency(request: Request, env: Env): Promise<Response> {
+  try {
+    const auth = await requireUser(request, env);
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      throw new ValidationError({ productCodes: "商品を指定してください。" });
+    }
+
+    // productCodes 検証は既存 checkout と同じ（順序非依存・空/重複拒否・文字種）。
+    const productCodes = parseProductCodes(body);
+
+    // 依存条件のみを M_PRODUCT_DEPENDENCY 正本で判定する。
+    // 未充足は DEPENDENCY_REQUIRED(409) を throw、循環/混在は DependencyConfigError。
+    // Checkout Session は作らない。active checkout も参照・変更しない。
+    await checkProductDependencies(env, auth.authUserId, productCodes);
+
+    return jsonOk({ ok: true });
+  } catch (err) {
+    return toErrorResponse(err);
+  }
+}
+
 /**
  * GET /api/purchases/active-checkout
  *

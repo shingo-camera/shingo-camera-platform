@@ -16,6 +16,132 @@
   "use strict";
   var CFG = window.SITE_CONFIG || {};
 
+  // DB（/api/products）由来の販売情報キャッシュ（全画面で共有）。
+  // 価格・販売可否の正本は DB。site-config は静的表示情報（説明/features/アイコン）のみ。
+  // { code: { purchaseEnabled, saleType, displayPrice, billingInterval } }
+  var saleInfoByCode = {};
+  var saleInfoLoaded = false;   // /api/products の取得に成功したか
+  async function loadSaleInfo() {
+    try {
+      var res = await fetch("/api/products");
+      if (!res.ok) { saleInfoLoaded = false; return; }
+      var body = await res.json();
+      ((body.data && body.data.products) || []).forEach(function (p) {
+        saleInfoByCode[p.code] = {
+          name: p.name,
+          purchaseEnabled: (p.purchaseEnabled === true),
+          saleType: p.saleType,
+          displayPrice: p.displayPrice,
+          billingInterval: p.billingInterval,
+          dependencies: Array.isArray(p.dependencies) ? p.dependencies : [],
+        };
+      });
+      saleInfoLoaded = true;
+    } catch (e) {
+      saleInfoLoaded = false; // 取得失敗 → 安全側（価格・購入可否を推測しない）
+    }
+  }
+
+  // 商品コード → 表示名（PRODUCT_NAME）。取得できない場合は null（ユーザー向けUIに商品コードを出さない）。
+  function productName(code) {
+    var s = saleInfoByCode[code];
+    return (s && s.name) ? s.name : null;
+  }
+
+  // DEPENDENCY_REQUIRED の details から利用者向け文言を組み立てる。
+  // 固定文言・特定商品のハードコードにしない。M_PRODUCT_DEPENDENCY の構造に沿って生成する:
+  // - グループ内候補（requiresAnyOf）が複数 → ANY_OF（「A または B のいずれか」）
+  // - グループが複数 → ALL_OF（すべて必要）。グループごとに satisfyMode を個別表現する:
+  //     ENTITLEMENT_OR_CART = 既所有または同時選択で充足 / ENTITLEMENT_ONLY = 事前購入必須（同時カート不可）
+  // - PRODUCT_NAME が1つでも取得できない場合は、商品コードを露出させず全体を汎用文言へフォールバック。
+  // 商品名は PRODUCT_NAME（productName）を使い、商品コードや固定文字列はユーザー向けに出さない。
+  function dependencyMessage(details) {
+    var GENERIC = "この商品を購入するには、前提となる商品が必要です。選び直してください。";
+    if (!details || !details.productCode || !Array.isArray(details.missingGroups) || details.missingGroups.length === 0) {
+      return GENERIC;
+    }
+    var target = productName(details.productCode);
+    if (!target) return GENERIC; // 対象商品名が取れない → コードを出さず汎用へ
+
+    // 1グループを「候補を または で連結 ＋（複数候補なら）のいずれか」の句にする。
+    // 候補名が1つでも取れなければ null（→呼出側で汎用フォールバック）。
+    function groupPhrase(g) {
+      var cands = (g && Array.isArray(g.requiresAnyOf)) ? g.requiresAnyOf : [];
+      if (cands.length === 0) return null;
+      var names = [];
+      for (var i = 0; i < cands.length; i++) {
+        var nm = productName(cands[i]);
+        if (!nm) return null; // 名前不明の候補がある → 汎用へ倒す（コード露出を避ける）
+        names.push(nm);
+      }
+      // ANY_OF: 候補が複数なら「A または B のいずれか」、単一ならその名前のみ。
+      return names.length >= 2 ? (names.join(" または ") + " のいずれか") : names[0];
+    }
+
+    // ALL_OF: 複数句を「A、およびB」で連結する共通ヘルパー。
+    function joinAll(list) {
+      return list.length >= 2
+        ? (list.slice(0, -1).join("、") + "、および" + list[list.length - 1])
+        : list[0];
+    }
+
+    // グループを satisfyMode 別に句へ変換する。1つでも句が作れなければ汎用へ（コード露出回避）。
+    var orCartPhrases = []; // ENTITLEMENT_OR_CART（同時選択可）
+    var onlyPhrases = [];   // ENTITLEMENT_ONLY（事前購入必須）
+    for (var i = 0; i < details.missingGroups.length; i++) {
+      var g = details.missingGroups[i];
+      var phrase = groupPhrase(g);
+      if (!phrase) return GENERIC;
+      if (g && g.satisfyMode === "ENTITLEMENT_ONLY") {
+        onlyPhrases.push(phrase);
+      } else {
+        // details.satisfyMode はサーバーが DB CHECK 済みの既知値のみ返すため OR_CART として扱う。
+        orCartPhrases.push(phrase);
+      }
+    }
+
+    var sentences = [];
+    if (orCartPhrases.length > 0) {
+      var orNeeded = joinAll(orCartPhrases);
+      sentences.push(orNeeded + "が必要です。すでに購入済みでない場合は、" + orNeeded + "も一緒に選択してください。");
+    }
+    if (onlyPhrases.length > 0) {
+      var onlyNeeded = joinAll(onlyPhrases);
+      // OR_CART の文が先にある場合は「また、」で接続して事前購入必須を続ける。
+      var prefix = orCartPhrases.length > 0 ? "また、" : "";
+      sentences.push(prefix + onlyNeeded + "を事前に購入している必要があります。");
+    }
+    if (sentences.length === 0) return GENERIC;
+
+    return target + "を購入するには、" + sentences.join("");
+  }
+
+  // Store カード常時表示用の簡潔な依存案内。dependencies（M_PRODUCT_DEPENDENCY 由来のグループ）から
+  // 「ご購入には ◯◯ が必要です。」相当の文を作る。M_PRODUCT_DEPENDENCY は購入可否の依存条件であり
+  // 利用可否の条件ではない（isProductAvailable は依存を見ない）ため、「ご利用には」ではなく「ご購入には」とする。
+  // ANY_OF は「A または B のいずれか」、複数グループ ALL_OF は「A、およびB」で連結。satisfyMode の差は
+  // 常時表示では簡潔さ優先で出さない（購入導線で precheck の dependencyMessage が正確に案内する。事実と矛盾しない）。
+  // PRODUCT_NAME が1つでも取れない／依存情報が無い場合は空文字（依存案内を出さない・コード非露出）。
+  function dependencyNotice(depGroups) {
+    if (!Array.isArray(depGroups) || depGroups.length === 0) return "";
+    var groups = [];
+    for (var i = 0; i < depGroups.length; i++) {
+      var cands = (depGroups[i] && Array.isArray(depGroups[i].requiresAnyOf)) ? depGroups[i].requiresAnyOf : [];
+      if (cands.length === 0) return "";
+      var names = [];
+      for (var j = 0; j < cands.length; j++) {
+        var nm = productName(cands[j]);
+        if (!nm) return ""; // 名前不明 → 依存案内を出さない（コード露出回避）
+        names.push(nm);
+      }
+      groups.push(names.length >= 2 ? (names.join(" または ") + " のいずれか") : names[0]);
+    }
+    var needed = groups.length >= 2
+      ? (groups.slice(0, -1).join("、") + "、および" + groups[groups.length - 1])
+      : groups[0];
+    return "ご購入には " + needed + "が必要です。";
+  }
+
   // ---- 端末ID（プラットフォーム共通キー）----
   var deviceId = (function () {
     try {
@@ -139,7 +265,7 @@
         '<a href="/terms/">利用規約</a>' +
         '<a href="/privacy/">プライバシー</a>' +
         '<a href="/commercial-transactions/">特商法</a>' +
-        '<a href="/contact/">お問い合わせ</a>' +
+        '<a href="/support/">お問い合わせ</a>' +
       '</div>' +
       '</div>';
   }
@@ -246,7 +372,11 @@
   }
   function availableCard(p) {
     var meta = productMeta(p.code);
-    var action = (meta && meta.purchasable)
+    // 販売可否の正本は DB（/api/account/products の purchaseEnabled + saleType）。
+    // purchaseEnabled===true かつ saleType==='ONE_TIME' の商品だけ購入導線を出す。
+    // SUBSCRIPTION は実決済未対応のため購入不可。取得できない場合も安全側（準備中）。
+    var onSale = (p.purchaseEnabled === true && p.saleType === "ONE_TIME");
+    var action = onSale
       ? '<a class="btn btn-sm secondary" href="/store/">STORE で購入</a>'
       : '<span class="badge">' + esc((meta && meta.badge) || "準備中") + '</span>';
     return launchCardHtml(meta, p, action);
@@ -330,6 +460,62 @@
   // codes: 選択された PRODUCT_CODE 配列。operationId は購入操作ごとに 1 回生成し、
   // 同一操作の再送では同じ値を使う（HTTP 再送収束）。UI 表示は正本にせず、
   // 可否はサーバー(checkout API)が最終判定する。
+  // Stripe Checkout 遷移前の購入条件確認モーダル（client-side のみ・決済処理は変更しない）。
+  // 確認で true、キャンセルで false を返す。金額は site-config の表示用 amount/priceDisplay を
+  // 使う（実課金額の正本は Stripe Price のまま。ここは利用者向け表示専用）。
+  // 購入確認モーダル用: DB DISPLAY_PRICE を金額の正本として引く。
+  // saleInfoByCode（/api/products 由来）に無ければ 0（＝金額不明・安全側）。site-config の amount は使わない。
+  function priceOf(code) {
+    var s = saleInfoByCode[code];
+    return (s && typeof s.displayPrice === "number") ? s.displayPrice : 0;
+  }
+
+  function showPurchaseConfirm(codes) {
+    return new Promise(function (resolve) {
+      var items = codes.map(function (c) {
+        var m = productMeta(c) || {};
+        var amt = priceOf(c); // DB DISPLAY_PRICE が正本
+        var name = (m.displayName || m.name || c);
+        return { name: name, amount: amt };
+      });
+      var total = items.reduce(function (s, it) { return s + it.amount; }, 0);
+
+      var ov = document.createElement("div");
+      ov.className = "pconf-overlay";
+      var rows = items.map(function (it) {
+        return '<div class="pconf-row"><span>' + esc(it.name) + '</span>' +
+          '<span>¥' + it.amount.toLocaleString() + '</span></div>';
+      }).join("");
+
+      ov.innerHTML =
+        '<div class="pconf" role="dialog" aria-modal="true" aria-labelledby="pconf-title">' +
+          '<h2 id="pconf-title" class="pconf-title">購入内容の確認</h2>' +
+          '<div class="pconf-items">' + rows +
+            '<div class="pconf-row pconf-total"><span>合計（税込）</span>' +
+            '<span>¥' + total.toLocaleString() + '</span></div>' +
+          '</div>' +
+          '<p class="pconf-note">デジタル商品のため、購入者都合による返品・キャンセルは原則お受けしていません。</p>' +
+          '<div class="pconf-actions">' +
+            '<button type="button" class="btn secondary" id="pconf-cancel">戻る</button>' +
+            '<button type="button" class="btn btn-primary" id="pconf-proceed">Stripeで購入手続きへ</button>' +
+          '</div>' +
+        '</div>';
+
+      function close(result) {
+        document.removeEventListener("keydown", onKey);
+        if (ov.parentNode) ov.parentNode.removeChild(ov);
+        resolve(result);
+      }
+      function onKey(e) { if (e.key === "Escape") close(false); }
+
+      document.body.appendChild(ov);
+      document.addEventListener("keydown", onKey);
+      ov.addEventListener("click", function (e) { if (e.target === ov) close(false); });
+      ov.querySelector("#pconf-cancel").addEventListener("click", function () { close(false); });
+      ov.querySelector("#pconf-proceed").addEventListener("click", function () { close(true); });
+    });
+  }
+
   async function startMultiCheckout(codes, btn, operationId, restart) {
     if (!codes || codes.length === 0) return;
     var opId = operationId || newOperationId();
@@ -408,7 +594,7 @@
       } else if (res.status === 409 && code === "DEPENDENCY_REQUIRED") {
         // precheck 拒否（create 前・新 attempt 未作成が確定）→ 復元。
         restorePending(prevPending);
-        await notify("この追加機能を購入するには HANABI PLANNER 本体が必要です。HANABI も選択してください。");
+        await notify(dependencyMessage(body && body.error && body.error.details));
       } else if (res.status === 409 && code === "ALREADY_PURCHASED") {
         // precheck 拒否（新 attempt 未作成が確定）。旧 pending の導線を消さないよう prevPending へ復元。
         restorePending(prevPending);
@@ -489,7 +675,28 @@
     var token = await getToken();
 
     var products = (CFG.products && Object.keys(CFG.products).map(function (k) { return CFG.products[k]; })) || [];
-    var sellable = products.filter(function (m) { return m.purchasable; });
+    // 発売中・準備中を問わず全商品カードを表示する（準備中商品もカードは出す）。順序は既存のまま。
+    var storeProducts = products;
+
+    // 販売状態の正本は DB（M_PRODUCT）。/api/products（公開）から取得し、code で商品にマージする。
+    // 販売可否は DB で purchaseEnabled===true かつ saleType==='ONE_TIME' と確認できた商品だけ購入可能表示。
+    // 取得に失敗した場合や DB に該当が無い商品は、購入可能と推測せず安全側（準備中）へ倒す。
+    await loadSaleInfo();
+    var saleLoadFailed = !saleInfoLoaded;
+    storeProducts.forEach(function (m) {
+      var s = saleInfoByCode[m.code];
+      if (s) {
+        // DB で確認できた販売情報で上書き（これが正本）。
+        m.purchaseEnabled = (s.purchaseEnabled === true);
+        m.saleType = s.saleType;
+        m.displayPrice = s.displayPrice;
+        m.billingInterval = s.billingInterval;
+      } else {
+        // DB で確認できない商品は購入可能にしない（安全側）。
+        m.purchaseEnabled = false;
+        m.saleUnknown = true; // 販売状態を確認できなかった（読込失敗 or 該当なし）
+      }
+    });
 
     // 購入済み判定（ログイン時のみ）
     var grantedSet = {};
@@ -547,13 +754,14 @@
 
     // STORE は誰でも閲覧可能（未ログインでも商品を表示し、購入操作時のみログインへ誘導）。
 
-    var rows = sellable.map(function (m) { return storeSelectRow(m, !!grantedSet[m.code], !!token); }).join("");
+    var rows = storeProducts.map(function (m) { return storeSelectRow(m, !!grantedSet[m.code], !!token); }).join("");
     wrap.innerHTML =
       pendingHtml +
       '<div class="store-select-list">' + (rows || '<p class="launcher-empty">現在購入可能な商品はありません。</p>') + '</div>' +
       '<div class="store-summary">' +
         '<div class="ss-total">合計: <span id="store-total">¥0</span></div>' +
         '<button class="btn" id="store-buy" disabled>選択した商品を購入</button>' +
+        '<p class="store-agree">購入手続きを進めることで、<a href="/terms/" target="_blank" rel="noopener">利用規約</a>に同意したものとします。</p>' +
       '</div>';
 
     // 進行中バナーのイベント
@@ -571,9 +779,13 @@
     function selectedCodes() {
       return boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.getAttribute("data-select"); });
     }
+    // storeProducts（DB 情報マージ済み）を code で引く lookup。
+    var metaByCode = {};
+    storeProducts.forEach(function (m) { metaByCode[m.code] = m; });
     function amountOf(code) {
-      var m = CFG.products[code];
-      return (m && typeof m.amount === "number") ? m.amount : 0;
+      var m = metaByCode[code];
+      // DB DISPLAY_PRICE が金額の正本。無ければ 0（site-config の amount は使わない）。
+      return (m && typeof m.displayPrice === "number") ? m.displayPrice : 0;
     }
     function refresh() {
       // 依存条件は STORE カード内に常時表示（sr-dep §5/§6）。動的な同義警告は重複するため出さない。
@@ -586,7 +798,7 @@
 
     boxes.forEach(function (b) { b.addEventListener("change", refresh); });
     if (buyBtn) {
-      buyBtn.addEventListener("click", function () {
+      buyBtn.addEventListener("click", async function () {
         var codes = selectedCodes();
         if (codes.length === 0) return;
         // 未ログインで購入操作 → ログインへ誘導し、成功後 STORE へ戻す（購入時のみ認証必須）。
@@ -594,6 +806,57 @@
           window.location.href = "/login/?redirect=" + encodeURIComponent("/store/");
           return;
         }
+        // 保険: 購入不可（準備中・非対応販売方式）商品が万一混ざっていたら購入へ進めない。
+        // 最終判定はサーバー（precheckMultiCheckout が M_PRODUCT を正本に判定）が行う。
+        // ここでは DB で purchaseEnabled===true かつ saleType==='ONE_TIME' の商品のみ許可。
+        var hasNotOnSale = codes.some(function (c) {
+          var m = metaByCode[c];
+          return !(m && m.purchaseEnabled === true && m.saleType === "ONE_TIME");
+        });
+        if (hasNotOnSale) {
+          await notify("選択された商品の中に、現在購入できない商品が含まれています。");
+          return;
+        }
+        // 依存条件の事前チェック（Stripe Checkout を作らない）。
+        // 依存 NG（DEPENDENCY_REQUIRED）なら、購入内容確認モーダルを出す前に停止して案内する。
+        // 依存判定の正本はサーバー（M_PRODUCT_DEPENDENCY）。ここでは HANABI 等の固有条件を持たず、
+        // 自動で本体商品を選択しない（ユーザーに選び直させる）。
+        // このチェックは UX 改善であり、購入実行時の依存チェック（handleCheckout）を代替しない。
+        if (buyBtn) { buyBtn.disabled = true; buyBtn.textContent = "確認中…"; }
+        var depOk = false;
+        try {
+          var depRes = await fetch("/api/purchases/precheck-dependency", {
+            method: "POST",
+            headers: Object.assign({ "Content-Type": "application/json" }, authHeaders(token)),
+            body: JSON.stringify({ productCodes: codes }),
+          });
+          if (depRes.ok) {
+            depOk = true;
+          } else {
+            var depBody = null;
+            try { depBody = await depRes.json(); } catch (e) {}
+            var depCode = depBody && depBody.error && depBody.error.code;
+            if (depRes.status === 409 && depCode === "DEPENDENCY_REQUIRED") {
+              await notify(dependencyMessage(depBody && depBody.error && depBody.error.details));
+            } else if (depRes.status === 401) {
+              window.location.href = "/login/?redirect=" + encodeURIComponent("/store/");
+              return;
+            } else {
+              // その他は購入内容確認モーダルへ進める（最終判定はサーバーの checkout が行う）。
+              depOk = true;
+            }
+          }
+        } catch (e) {
+          // 通信失敗時は事前チェックをスキップし、従来どおり最終判定をサーバーに委ねる。
+          depOk = true;
+        } finally {
+          if (buyBtn) { buyBtn.disabled = codes.length === 0; buyBtn.textContent = "選択した商品を購入"; }
+        }
+        if (!depOk) return;
+        // Stripe Checkout へ遷移する前に、購入条件・法務条件の確認ステップを挟む。
+        // 確認された場合のみ既存 startMultiCheckout を呼ぶ（キャンセル時は checkout API を呼ばない）。
+        var proceed = await showPurchaseConfirm(codes);
+        if (!proceed) return;
         startMultiCheckout(codes, buyBtn, null);
       });
     }
@@ -601,34 +864,67 @@
   }
 
   // 選択行（購入済みは選択不可・購入済み表示）
-  // STORE 固有の利用条件表示（§5）: 依存商品がある場合のみ「ご利用には ◯◯ が必要です。」
+  // STORE 固有の利用条件表示（§5）: 依存商品がある場合のみ「ご購入には ◯◯ が必要です。」
+  // M_PRODUCT_DEPENDENCY は購入可否の依存（利用可否ではない）。正本は /api/products の dependencies。
+  // 正本は M_PRODUCT_DEPENDENCY（/api/products の dependencies）。site-config の固定 dependsOn は使わない。
   // 商品 description には含めず、HOME / MY PAGE では表示しない。
   function depNoticeHtml(meta) {
-    if (!meta || !meta.dependsOn) return "";
-    var dep = CFG.products && CFG.products[meta.dependsOn];
-    var depName = dep ? dep.displayName : meta.dependsOn;
-    return '<p class="sr-dep muted-note">ご利用には ' + esc(depName) + ' が必要です。</p>';
+    if (!meta) return "";
+    // dependencies は /api/products 由来（saleInfoByCode 経由でも meta 直下でも可）。
+    var info = saleInfoByCode[meta.code];
+    var groups = (info && Array.isArray(info.dependencies)) ? info.dependencies
+      : (Array.isArray(meta.dependencies) ? meta.dependencies : []);
+    var text = dependencyNotice(groups);
+    if (!text) return ""; // 依存なし・名前不明 → 依存案内を出さない（コード非露出）
+    return '<p class="sr-dep muted-note">' + esc(text) + '</p>';
+  }
+
+  // 表示価格文字列を生成する（DB の displayPrice / saleType / billingInterval が正本）。
+  // ONE_TIME: "¥13,000" / SUBSCRIPTION+MONTH: "¥980 / 月" / +YEAR: "¥xxx / 年"。
+  // DB 値が無い場合は site-config の静的表示（priceDisplay）にフォールバックする。
+  function formatDisplayPrice(meta) {
+    if (typeof meta.displayPrice === "number") {
+      var base = "¥" + meta.displayPrice.toLocaleString();
+      if (meta.saleType === "SUBSCRIPTION") {
+        var unit = meta.billingInterval === "YEAR" ? "年"
+          : meta.billingInterval === "MONTH" ? "月"
+          : null;
+        return unit ? (base + " / " + unit) : base;
+      }
+      return base;
+    }
+    // DB から価格を取得できない場合は、site-config の古い静的価格を使わず安全側表示にする。
+    return "価格情報を取得できません";
   }
 
   function storeSelectRow(meta, granted, loggedIn) {
     var iconHtml = meta.icon ? '<img src="' + esc(meta.icon) + '" alt="" />' : '<span class="icon-fallback">ICON</span>';
-    var price = meta.priceDisplay ? esc(meta.priceDisplay) : "価格は購入画面で確認";
+    var price = formatDisplayPrice(meta);
+    // 販売可否の正本は DB（/api/products）の purchaseEnabled + saleType。
+    // 購入可能にするのは purchaseEnabled===true かつ saleType==='ONE_TIME' の商品のみ。
+    // SUBSCRIPTION は実決済未対応のため購入不可（準備中）。取得失敗も安全側（準備中）。
+    var onSale = (meta.purchaseEnabled === true && meta.saleType === "ONE_TIME");
     var cta;
     if (granted) {
       // 購入済み: バッジ＋（APP があれば）利用する導線。再購入させない。
+      // （既存購入者は販売停止の影響を受けず、利用権はそのまま表示する）
       var useHtml = meta.appUrl
         ? '<a class="btn btn-sm sr-use" href="' + esc(meta.appUrl) + '" target="_blank" rel="noopener noreferrer">利用する</a>'
         : '';
       cta = '<span class="badge badge-owned">購入済み</span>' + useHtml;
+    } else if (!onSale) {
+      // 未発売（準備中）: 選択チェックボックスを出さない＝購入対象として選べない。
+      // DB で purchaseEnabled=true と確認できない限りここに入る（取得失敗も安全側で準備中）。
+      cta = '<span class="badge badge-soon">準備中</span>';
     } else {
-      // 未購入: 選択チェックボックス（未ログインでも表示。購入操作時にログイン誘導）。
+      // 未購入かつ販売中: 選択チェックボックス（未ログインでも表示。購入操作時にログイン誘導）。
       cta =
         '<label class="store-check">' +
           '<input type="checkbox" data-select="' + esc(meta.code) + '" /> 選択' +
         '</label>';
     }
     // HOME の商品カードを正本としたカード構造（§1/§2）。theme で hover/アクセントも共通化。
-    return '<div class="product-card ' + productThemeClass(meta.code) + ' store-card' + (granted ? " is-owned" : "") + '">' +
+    return '<div class="product-card ' + productThemeClass(meta.code) + ' store-card' + (granted ? " is-owned" : "") + (!onSale && !granted ? " is-soon" : "") + '">' +
       '<div class="pc-body">' +
         '<div class="pc-icon">' + iconHtml + '</div>' +
         '<div>' +
@@ -702,12 +998,21 @@
     // SUN AND MOON 価格
     var priceEl = document.getElementById("sam-price");
     if (priceEl) {
-      var meta = productMeta("SUN_AND_MOON");
-      if (meta && meta.priceDisplay) {
-        priceEl.textContent = meta.priceDisplay;
-      } else {
-        priceEl.innerHTML = '価格は準備中です <span class="muted-note">（確定後に表示）</span>';
-      }
+      // 価格の正本は DB（/api/products の DISPLAY_PRICE）。site-config の静的価格は使わない。
+      // 取得できない場合は古い価格を出さず安全側表示にする。
+      priceEl.textContent = "価格を読み込み中…";
+      loadSaleInfo().then(function () {
+        var s = saleInfoByCode["SUN_AND_MOON"];
+        if (s && typeof s.displayPrice === "number") {
+          priceEl.textContent = formatDisplayPrice({
+            displayPrice: s.displayPrice,
+            saleType: s.saleType,
+            billingInterval: s.billingInterval,
+          });
+        } else {
+          priceEl.innerHTML = '価格情報を取得できません <span class="muted-note">（時間をおいて再度お試しください）</span>';
+        }
+      });
     }
     // note 誘導（SUN AND MOON 詳細）
     var noteWrap = document.getElementById("sam-note-link");

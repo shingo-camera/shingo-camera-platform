@@ -123,9 +123,10 @@ const siteCssB = readFileSync("public/assets/site.css", "utf8");
 test("[項目5] スマホ地図上の太陽/月トグルが既存 setSunsetMode を再利用している", () => {
   // ボタンは既存処理へ直結（新ロジックなし）
   assert.match(htmlB, /<button id="map-body-toggle" onclick="setSunsetMode\(!sunsetMode\)"/);
-  // スマホのみ表示（PC既定は非表示）
-  assert.match(htmlB, /#map-body-toggle\{display:none;/);
-  assert.match(htmlB, /@media\(max-width:600px\)\{#map-body-toggle\{display:block;\}\}/);
+  // PC 既定は非表示（発売前実機修正で右端縦列へ移動後の現行 CSS。空白を許容）
+  assert.match(htmlB, /#map-body-toggle\{\s*display:none;\s*\}/);
+  // スマホ（max-width:600px）でのみ表示。衛星ボタン直下の右端縦列に flex 配置する現行仕様。
+  assert.match(htmlB, /@media \(max-width:600px\)\{[\s\S]*?#map-body-toggle\{\s*display:flex\s*!important;/);
   // 状態同期は setSunsetMode 内で一元管理（太陽=☀/月=☾が判別可能）
   assert.match(htmlB, /mbt\.textContent=v\?'☀ 太陽':'☾ 月';/);
   // sunsetMode の代入箇所が増えていない（宣言+setSunsetMode内のみ＝状態一元）

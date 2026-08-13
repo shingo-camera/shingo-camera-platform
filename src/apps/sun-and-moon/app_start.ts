@@ -35,7 +35,13 @@ export async function handleSunAndMoonAppStart(request: Request, env: Env): Prom
 
   // APP_START アクセスログ（抑制付き）。設定値異常は握って処理継続（利用は妨げない）。
   try {
-    await recordAppStartAccess(request, env, result.auth.authUserId, result.product.PRODUCT_ID);
+    await recordAppStartAccess(
+      request,
+      env,
+      result.auth.authUserId,
+      result.product.PRODUCT_ID,
+      result.auth.sessionId,
+    );
   } catch (e) {
     if (!(e instanceof AccessLogSettingError)) {
       throw e;

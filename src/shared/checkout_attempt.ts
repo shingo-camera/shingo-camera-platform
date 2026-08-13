@@ -180,6 +180,91 @@ export async function getAttemptItems(env: Env, attemptId: number): Promise<Atte
   return res.results ?? [];
 }
 
+/**
+ * fulfill 用: Session に紐づく attempt の item snapshot から Price ID → PRODUCT_CODE の逆引き Map を構築する。
+ *
+ * Price ID の正本は「その Checkout 開始時に保存した snapshot（T_CHECKOUT_ATTEMPT_ITEM.STRIPE_PRICE_ID）」。
+ * これにより、Checkout 開始後に運用者が M_PRODUCT.STRIPE_PRICE_ID を変更しても、旧 Session の line item price を
+ * snapshot から正しく商品コードへ解決でき、決済済み Session を正常に fulfill できる（unknown price id を防ぐ）。
+ *
+ * 特定順:
+ *   1. STRIPE_SESSION_ID 一致で attempt を特定（SID 保存済みの通常ケース）
+ *   2. operationId（client_reference_id）一致で特定（SID 未保存段階の Webpook / CASE C）
+ * どちらでも特定できない場合は null を返す（呼出側で「現在の M_PRODUCT へ無条件 fallback しない」を判断）。
+ *
+ * @returns snapshot 由来の Price→code Map。attempt を特定できなければ null。
+ */
+/**
+ * fulfill 用の Price snapshot 解決結果。
+ * - resolved  : attempt を特定でき、snapshot から Price→code Map を構築できた（Map を使う）。
+ * - not_found : SID / operationId のどちらでも attempt を特定できなかった（＝新方式 snapshot が無い）。
+ *               呼出側はこの場合に限り、限定的に現在の M_PRODUCT 逆引きへ fallback してよい。
+ * - invalid   : attempt は特定できたが snapshot が不正（item なし / 空 Price / 同一 Price 重複割当）。
+ *               この場合は fallback せず安全側でエラーにする（決済済みでも権限付与しない）。
+ */
+export type AttemptPriceMapResult =
+  | { status: "resolved"; map: Map<string, string> }
+  | { status: "not_found" }
+  | { status: "invalid"; detail: string };
+
+/**
+ * Session に紐づく attempt の item snapshot から Price ID → PRODUCT_CODE の逆引き Map を構築する。
+ *
+ * Price ID の正本は「その Checkout 開始時に保存した snapshot（T_CHECKOUT_ATTEMPT_ITEM.STRIPE_PRICE_ID）」。
+ * これにより、Checkout 開始後に運用者が M_PRODUCT.STRIPE_PRICE_ID を変更しても、旧 Session の line item price を
+ * snapshot から正しく商品コードへ解決でき、決済済み Session を正常に fulfill できる（unknown price id を防ぐ）。
+ *
+ * attempt 特定順:
+ *   1. STRIPE_SESSION_ID 一致（SID 保存済みの通常ケース）
+ *   2. operationId（client_reference_id）一致（SID 未保存段階の Webhook / CASE C）
+ *
+ * 戻り値は AttemptPriceMapResult（resolved / not_found / invalid）。
+ * attempt を特定できた以上、その snapshot の欠損・不一致は invalid（安全側エラー）として扱い、
+ * 現在の M_PRODUCT へ fallback しない。fallback は not_found（attempt 自体が無い）に限る。
+ */
+export async function buildPriceIdToCodeMapFromAttempt(
+  env: Env,
+  sessionId: string,
+  operationId: string | null,
+): Promise<AttemptPriceMapResult> {
+  const db = getDb(env);
+  let attemptId: number | null = null;
+
+  const bySid = await db
+    .prepare("SELECT ATTEMPT_ID FROM T_CHECKOUT_ATTEMPT WHERE STRIPE_SESSION_ID = ?")
+    .bind(sessionId)
+    .first<{ ATTEMPT_ID: number }>();
+  if (bySid) {
+    attemptId = bySid.ATTEMPT_ID;
+  } else if (operationId) {
+    const byOp = await getAttemptByOperationId(env, operationId);
+    if (byOp) attemptId = byOp.ATTEMPT_ID;
+  }
+  if (attemptId === null) return { status: "not_found" }; // attempt 特定不能＝限定 fallback 許可
+
+  // ここから先は attempt が存在する。snapshot が不正なら invalid（fallback せず安全側エラー）。
+  const items = await getAttemptItems(env, attemptId);
+  if (items.length === 0) {
+    return { status: "invalid", detail: "attempt has no item snapshot" };
+  }
+
+  const map = new Map<string, string>();
+  for (const it of items) {
+    if (!it.STRIPE_PRICE_ID) {
+      return { status: "invalid", detail: `attempt item has empty price snapshot: ${it.PRODUCT_CODE}` };
+    }
+    const existing = map.get(it.STRIPE_PRICE_ID);
+    if (existing && existing !== it.PRODUCT_CODE) {
+      return {
+        status: "invalid",
+        detail: `price id assigned to multiple products in snapshot: ${existing}, ${it.PRODUCT_CODE}`,
+      };
+    }
+    map.set(it.STRIPE_PRICE_ID, it.PRODUCT_CODE);
+  }
+  return { status: "resolved", map };
+}
+
 /* ============================================================
  * 新規 attempt 作成（attempt + item + cart 全 lock を 1 batch・全 or 無）
  * ============================================================ */

@@ -45,8 +45,13 @@ SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
-STRIPE_PRICE_SUN_AND_MOON=
-STRIPE_PRICE_HANABI=
-STRIPE_PRICE_HANABI_GOOGLE_EARTH=
+# 商品別 Stripe Price ID は M_PRODUCT.STRIPE_PRICE_ID（DB）で管理する。
+# env の商品別 STRIPE_PRICE_* は廃止（Local/Test D1 に Test Price、Production D1 に Live Price を設定）。
 ADMIN_AUTH_USER_ID=
 MAIL_API_KEY=
+
+# session_id を SESSION_ID_HASH へ保存する際の HMAC 鍵（サーバー側の秘密）。
+# 生の session_id を保存せず、この鍵で HMAC-SHA256 して T_ACCESS_LOG.SESSION_ID_HASH に保存する。
+# 未設定なら SESSION_ID_HASH は NULL のまま（アクセスログ記録は継続。不正検知の補助情報が減るだけ）。
+# 十分に長いランダム文字列を設定する（例: openssl rand -hex 32）。
+SESSION_ID_HASH_SECRET=your-random-hmac-secret-here

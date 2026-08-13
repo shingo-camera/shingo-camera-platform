@@ -26,7 +26,6 @@ import { onRequest as chance } from "./api/chance.js";
 import { onRequest as events } from "./api/events.js";
 import { onRequest as fans } from "./api/fans.js";
 import { onRequest as fullmoon } from "./api/fullmoon.js";
-import { onRequest as hello } from "./api/hello.js";
 import { onRequest as instant } from "./api/instant.js";
 import { onRequest as kmzastro } from "./api/kmzastro.js";
 import { onRequest as mooncalendar } from "./api/mooncalendar.js";
@@ -48,7 +47,6 @@ const HANDLERS: Record<string, ApiHandler> = {
   events,
   fans,
   fullmoon,
-  hello,
   instant,
   kmzastro,
   mooncalendar,

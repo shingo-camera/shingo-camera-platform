@@ -20,8 +20,8 @@ window.SITE_CONFIG = {
   // WORK-011 では Instagram と note のみ。X / YouTube は載せない。
   // 実URL未提供のため null。確定したらここに URL を入れるだけでリンクが有効化される。
   sns: {
-    instagram: null, // 例: "https://www.instagram.com/xxxx"
-    note: null,      // note トップ or マガジン。例: "https://note.com/xxxx"
+    instagram: "https://www.instagram.com/shingo_camera/",
+    note: "https://note.com/shingo_camera",
   },
 
   // ---- note 記事URL（商品ごとの詳しい説明・作例へ誘導）----
@@ -49,15 +49,11 @@ window.SITE_CONFIG = {
         "地図上での天体位置表示・軌跡確認",
         "KMZ 出力による Google Earth 連携",
       ],
-      // 表示価格（表示専用。実課金は Stripe Price が正本）
-      priceDisplay: "¥13,000",
-      amount: 13000,
+      // 価格は DB（M_PRODUCT.DISPLAY_PRICE / migration 0007）が正本。site-config には持たない。
       // アプリ起動先
       appUrl: "/apps/sun-and-moon/",
       // 商品コード（既存 API と突き合わせ）
       code: "SUN_AND_MOON",
-      // 購入可能か
-      purchasable: true,
     },
     HANABI: {
       displayName: "HANABI PLANNER",
@@ -68,11 +64,8 @@ window.SITE_CONFIG = {
         "打ち上げ位置と撮影地から構図をシミュレーション",
         "Google Earth 連携で立体的に確認",
       ],
-      priceDisplay: "¥4,000",
-      amount: 4000,
-      appUrl: null,          // Platform 未統合（購入は可能）
+      appUrl: null,          // Platform 未統合
       code: "HANABI",
-      purchasable: true,
     },
     HANABI_GOOGLE_EARTH: {
       displayName: "HANABI Google Earth 連携",
@@ -83,15 +76,11 @@ window.SITE_CONFIG = {
       features: [
         "Google Earth 上での立体的な構図確認",
       ],
-      priceDisplay: "¥10,000",
-      amount: 10000,
       appUrl: null,
       // 商品マスタ(M_PRODUCT)に実在する PRODUCT_CODE。
       code: "HANABI_GOOGLE_EARTH",
-      purchasable: true,
-      // 依存: この商品を購入するには HANABI 本体の保有（または同時購入）が必要。
-      //       最終的な依存判定はサーバー(precheckMultiCheckout)が正本。UI はガイドのみ。
-      dependsOn: "HANABI",
+      // 依存条件は M_PRODUCT_DEPENDENCY が正本（/api/products の dependencies で配信）。
+      // ここに固定の依存定義（dependsOn）は持たない（二重管理を避ける）。
     },
   },
 

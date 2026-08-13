@@ -22,9 +22,6 @@ declare module "*/api/fans.js" {
 declare module "*/api/fullmoon.js" {
   export function onRequest(context: SunMoonApiContext): Promise<Response>;
 }
-declare module "*/api/hello.js" {
-  export function onRequest(context: SunMoonApiContext): Response;
-}
 declare module "*/api/instant.js" {
   export function onRequest(context: SunMoonApiContext): Promise<Response>;
 }

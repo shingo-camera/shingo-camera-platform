@@ -46,6 +46,48 @@ export class ValidationError extends Error {
 }
 
 /**
+ * 商品依存の未充足エラー（DEPENDENCY_REQUIRED(409)）。
+ *
+ * AppError を継承しつつ、フロントが「何を買うには何が必要か」を表示できるよう
+ * 機械可読な details（購入対象コード＋不足している前提グループ）を持つ。
+ * 商品コードは公開情報（/api/products で開示済み）なので details に載せてよい。
+ *
+ * details 構造（ANY_OF / ALL_OF / SATISFY_MODE 対応）:
+ *   { productCode: string, missingGroups: { requiresAnyOf: string[], satisfyMode: "ENTITLEMENT_ONLY" | "ENTITLEMENT_OR_CART" }[] }
+ * - missingGroups は「すべて充足が必要」（グループ間 ALL_OF）。未充足のグループのみを含む。
+ * - 各 group.requiresAnyOf は「いずれか1つ所有/同時購入で充足」（グループ内 ANY_OF）。
+ * - 各 group.satisfyMode は充足方式（グループ単位で異なりうる）。
+ *   ENTITLEMENT_ONLY=事前購入必須（同時カート不可） / ENTITLEMENT_OR_CART=既所有または同時選択で充足。
+ * - フロントは商品コードを PRODUCT_NAME へ変換して表示する（コードはユーザー向けに出さない）。
+ */
+export interface DependencyMissingGroup {
+  /** このグループを充足しうる前提商品コード群（いずれか1つで充足＝ANY_OF） */
+  requiresAnyOf: string[];
+  /**
+   * このグループの充足方式。
+   * - "ENTITLEMENT_ONLY": 事前購入（既所有）が必要。同時カートでは充足できない。
+   * - "ENTITLEMENT_OR_CART": 既所有または同時選択（同時購入）で充足できる。
+   * フロントはこの値で「事前購入が必要」か「同時選択でもよい」かを文言に反映する。
+   */
+  satisfyMode: "ENTITLEMENT_ONLY" | "ENTITLEMENT_OR_CART";
+}
+export interface DependencyRequiredDetails {
+  /** 依存を満たせなかった購入対象の商品コード */
+  productCode: string;
+  /** 未充足グループ（すべて充足が必要＝ALL_OF） */
+  missingGroups: DependencyMissingGroup[];
+}
+export class DependencyRequiredError extends AppError {
+  readonly details: DependencyRequiredDetails;
+
+  constructor(details: DependencyRequiredDetails, message = "この商品は、前提となる商品の購入が必要です。") {
+    super("DEPENDENCY_REQUIRED", message, 409);
+    this.name = "DependencyRequiredError";
+    this.details = details;
+  }
+}
+
+/**
  * ルートハンドラを共通エラーハンドリングで包む。
  *
  * - ValidationError: VALIDATION_ERROR(400) + fields
@@ -67,6 +109,9 @@ export function withErrorHandling(
     } catch (err) {
       if (err instanceof ValidationError) {
         return jsonError("VALIDATION_ERROR", "入力内容を確認してください。", 400, err.fields);
+      }
+      if (err instanceof DependencyRequiredError) {
+        return jsonError(err.code, err.message, err.status, undefined, err.details);
       }
       if (err instanceof AppError) {
         return jsonError(err.code, err.message, err.status);

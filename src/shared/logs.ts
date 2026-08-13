@@ -127,6 +127,11 @@ export interface WriteAccessLogInput {
   authUserId: string;
   productId: number;
   accessType: AccessType;
+  /**
+   * サーバー側で HMAC 生成済みの SESSION_ID_HASH（computeSessionIdHash の戻り値）。
+   * 生の session_id を渡してはならない。欠損・鍵未設定なら null（NULL 保存）。
+   */
+  sessionIdHash?: string | null;
 }
 
 /**
@@ -147,13 +152,14 @@ export async function writeAccessLog(
   const db = getDb(env);
   const now = nowIso();
   const c = extractConnInfo(request);
-  // OS_NAME / BROWSER_NAME / SESSION_ID_HASH は推測生成しないため NULL 固定。
+  // OS_NAME / BROWSER_NAME は推測生成しないため NULL 固定。
+  // SESSION_ID_HASH は呼出側がサーバー鍵で HMAC 生成済みの値のみ保存（生 session_id は保存しない）。
   await db
     .prepare(
       `INSERT INTO T_ACCESS_LOG
          (AUTH_USER_ID, PRODUCT_ID, ACCESS_DATE, ACCESS_TYPE, IP_ADDRESS, COUNTRY_CODE, REGION, CITY,
           DEVICE_ID, USER_AGENT, OS_NAME, BROWSER_NAME, SESSION_ID_HASH, CREATE_DATE)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
     )
     .bind(
       input.authUserId,
@@ -166,6 +172,7 @@ export async function writeAccessLog(
       c.city,
       c.deviceId,
       c.userAgent,
+      input.sessionIdHash ?? null,
       now,
     )
     .run();

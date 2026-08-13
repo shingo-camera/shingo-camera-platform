@@ -1,4 +1,4 @@
-# robots.txt — shingo-camera Platform
+# robots.txt — shingo_camera LABO
 # HTMLページは meta noindex で検索除外する方針のため Disallow しない
 # （Disallow するとクローラが noindex を読めないため）
 

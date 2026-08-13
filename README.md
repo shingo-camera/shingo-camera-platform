@@ -4,6 +4,8 @@ shingo-camera Platform（SUN AND MOON / HANABI / 将来アプリ）の共通認�
 商品権限・管理基盤のコードリポジトリ。設計の正本は別リポジトリ
 `shingo-camera-platform-spec` にある。
 
+発売前の残件・完了状況は `LAUNCH_CHECKLIST.md`（この実装リポジトリでの発売状態の正本）で管理する。
+
 本リポジトリは **WORK-001〜003** の成果物。現時点で以下を含む。
 
 - 共通レスポンス骨格 / 共通エラーハンドラ / `GET /api/health`（WORK-001）
@@ -419,7 +421,7 @@ SUN AND MOON PLANNER の買い切り販売。権限付与の正本は署名検�
 - T_PURCHASE: PURCHASE_SOURCE=0 / PAYMENT_STATUS=1 / EXTERNAL_PURCHASE_ID=Session ID。T_USER_PRODUCT: STATUS=1 / GRANT_TYPE=0 / END_DATE=9999-12-31T23:59:59+09:00。
 - 二重購入: Checkout 作成前に available を確認し ALREADY_PURCHASED(409)。Stripe 側で二重決済成立時は T_PURCHASE を購入事実として保持、T_USER_PRODUCT は 1 件のまま（管理者が返金判断）。
 - 画面: `/purchase/success/`（status をリトライ確認）, `/purchase/cancel/`（DB 更新なし）。
-- 秘密情報（Cloudflare Secrets）: STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / STRIPE_PRICE_SUN_AND_MOON / STRIPE_PRICE_HANABI / STRIPE_PRICE_HANABI_GOOGLE_EARTH。
+- 秘密情報（Cloudflare Secrets）: STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET。商品別 Stripe Price ID は M_PRODUCT.STRIPE_PRICE_ID（DB）で管理し、env の商品別 STRIPE_PRICE_* は使わない。
 
 ## 注文ライフサイクル堅牢化（WORK-011）
 
@@ -466,7 +468,7 @@ WORK-007 の Stripe 買い切り販売を、複数商品購入・二重 Checkout
 ### Stripe Dashboard / Secrets（デプロイ前に要確認）
 
 - **APP_BASE_URL**（非秘密の環境変数）を設定する。Stripe の success_url / cancel_url はこの固定オリジンから生成し、`request.url.origin` は使わない（同一 operation の retry で origin が揺れて Stripe create パラメータが変わるのを防ぐ）。Local は `.dev.vars` に `http://localhost:8787`、Production は wrangler.toml `[vars]` か Dashboard の Variables に実 URL を設定。未設定だと checkout は 500（壊れた URL の Session を作らない）。
-- Secrets: `STRIPE_PRICE_HANABI` / `STRIPE_PRICE_HANABI_GOOGLE_EARTH` を Cloudflare Secret（Local は .dev.vars）に設定（STORE で 3 商品販売するため）。
+- 商品別 Stripe Price ID: `M_PRODUCT.STRIPE_PRICE_ID`（DB）で管理する。Local/Test D1 には Test Price、Production D1 には Live Price を設定（環境ごとに独立管理。混在防止は Production 設定確認と E2E で担保）。env の商品別 STRIPE_PRICE_* は廃止。
 - Webhook イベント有効化: `checkout.session.completed` / `checkout.session.expired` / `charge.refunded`（または `refund.*`）/ `charge.dispute.created|updated|closed`。
 
 ### 障害回復の要点（追補）

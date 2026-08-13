@@ -28,7 +28,7 @@ import { getDb } from "./db";
 import { nowIso } from "./datetime";
 import { getMUser } from "./account";
 import { getActiveProductByCode, type ProductRow } from "./entitlement";
-import { AppError } from "./errors";
+import { AppError, DependencyRequiredError } from "./errors";
 import type { Env } from "../index";
 
 /** 買い切りの終了日時（JST） */
@@ -51,24 +51,21 @@ function toTime(iso: string): number {
  * ============================================================ */
 
 /**
- * 各商品の期待 Price ID をサーバー側 env（Cloudflare Secret）から解決する。
- * Price ID はソースにハードコードせず、Secret のみを正とする。
- * 商品追加時はここに case を追加する（新 SETTING_KEY は使わない）。
+ * 販売可否・販売方式の正本は M_PRODUCT の販売専用列（migration 0007）に一本化した。
  *
- * @returns Price ID、未設定・未対応商品は undefined
+ * 判定条件（precheckMultiCheckout 参照）:
+ *   - STATUS = 1（商品マスタ有効）かつ DEL_FLG = 0
+ *   - PURCHASE_ENABLED = 1（販売受付 ON）
+ *   - SALE_TYPE = 'ONE_TIME'（現行 Checkout 基盤は買い切りのみ対応。SUBSCRIPTION は安全側で拒否）
+ *   - STRIPE_PRICE_ID 設定済み（NULL/空 = 販売設定未完了で拒否）
+ *
+ * Stripe Price ID の正本も M_PRODUCT.STRIPE_PRICE_ID（DB）へ移行した。env の商品別
+ * STRIPE_PRICE_* 参照・resolvePriceId の商品コード switch・KNOWN_PRODUCT_CODES は廃止。
+ * 商品追加・販売開始/停止・Price 変更は M_PRODUCT 設定で行い、コード改修を不要にする。
+ * 旧 SELLABLE_PRODUCT_CODES / site-config purchasable も廃止済み。
  */
-export function resolvePriceId(env: Env, productCode: string): string | undefined {
-  switch (productCode) {
-    case "SUN_AND_MOON":
-      return env.STRIPE_PRICE_SUN_AND_MOON;
-    case "HANABI":
-      return env.STRIPE_PRICE_HANABI;
-    case "HANABI_GOOGLE_EARTH":
-      return env.STRIPE_PRICE_HANABI_GOOGLE_EARTH;
-    default:
-      return undefined;
-  }
-}
+export const SALE_TYPE_ONE_TIME = "ONE_TIME";
+export const SALE_TYPE_SUBSCRIPTION = "SUBSCRIPTION";
 
 /** Price 設定の重複（同一 Price ID が複数商品へ割当）を表す内部エラー。 */
 export class PriceConfigError extends Error {
@@ -78,29 +75,35 @@ export class PriceConfigError extends Error {
   }
 }
 
-/** サーバーが把握する全商品コード（Price 逆引き Map 構築の対象）。 */
-const KNOWN_PRODUCT_CODES = ["SUN_AND_MOON", "HANABI", "HANABI_GOOGLE_EARTH"] as const;
-
 /**
- * Price ID → PRODUCT_CODE の逆引き Map を env の Secret から構築する。
- * - 未設定（Secret 空）の商品は Map に含めない。
+ * Price ID → PRODUCT_CODE の逆引き Map を M_PRODUCT（DB）から構築する。
+ * Webhook 決済確定（stripe_fulfill）で line item の price.id を商品コードへ解決するために使う。
+ * Price ID の正本は M_PRODUCT.STRIPE_PRICE_ID（env の Secret ではない）。
+ *
+ * - STATUS=1 かつ DEL_FLG=0 かつ STRIPE_PRICE_ID が設定済みの商品のみ対象。
  * - 同一 Price ID が複数商品へ割り当てられている場合は、安全側で設定エラーとして例外を投げる
  *   （どの商品として付与すべきか一意に定まらないため、購入・権限付与しない）。
  *
  * @throws PriceConfigError 同一 Price ID が複数商品に割り当てられているとき
  */
-export function buildPriceIdToCodeMap(env: Env): Map<string, string> {
+export async function buildPriceIdToCodeMap(env: Env): Promise<Map<string, string>> {
+  const db = getDb(env);
+  const rows = await db
+    .prepare(
+      `SELECT PRODUCT_CODE AS code, STRIPE_PRICE_ID AS priceId
+       FROM M_PRODUCT
+       WHERE STATUS = 1 AND DEL_FLG = 0 AND STRIPE_PRICE_ID IS NOT NULL AND STRIPE_PRICE_ID <> ''`,
+    )
+    .all<{ code: string; priceId: string }>();
   const map = new Map<string, string>();
-  for (const code of KNOWN_PRODUCT_CODES) {
-    const priceId = resolvePriceId(env, code);
-    if (!priceId) continue; // 未設定はスキップ（販売準備中）
-    const existing = map.get(priceId);
-    if (existing && existing !== code) {
+  for (const r of rows.results ?? []) {
+    const existing = map.get(r.priceId);
+    if (existing && existing !== r.code) {
       throw new PriceConfigError(
-        `price id is assigned to multiple products: ${existing} and ${code}`,
+        `price id is assigned to multiple products: ${existing} and ${r.code}`,
       );
     }
-    map.set(priceId, code);
+    map.set(r.priceId, r.code);
   }
   return map;
 }
@@ -144,42 +147,265 @@ export async function isProductAvailable(
 }
 
 /* ============================================================
- * 商品依存条件（HANABI_GOOGLE_EARTH ← HANABI）
+ * 商品依存条件（M_PRODUCT_DEPENDENCY / migration 0008 が正本）
  * ============================================================ */
 
-/** 追加機能商品 → 前提となる本体商品コードの対応表。 */
-const PRODUCT_DEPENDENCIES: Record<string, string> = {
-  HANABI_GOOGLE_EARTH: "HANABI",
-};
+/** M_PRODUCT_DEPENDENCY の 1 行（有効な依存定義）。 */
+interface DependencyRow {
+  REQUIRES_CODE: string;
+  DEPENDENCY_GROUP: number;
+  SATISFY_MODE: string;
+}
+
+/** SATISFY_MODE の値。 */
+const SATISFY_ENTITLEMENT_ONLY = "ENTITLEMENT_ONLY";
+const SATISFY_ENTITLEMENT_OR_CART = "ENTITLEMENT_OR_CART";
 
 /**
- * 依存商品の購入可否を検証する（バックエンド必須。UI 依存にしない）。
- * 追加機能商品は「前提商品を既に保有」または「同一注文に前提商品を含む」ときのみ購入可。
+ * 依存設定そのものが不正（循環・グループ内 SATISFY_MODE 混在など）であることを表す内部設定エラー。
+ * 利用者の「前提商品を持っていない」（DEPENDENCY_REQUIRED）とは区別し、内部設定エラーとして安全側に停止する。
+ * ブラウザには内部詳細（SQL・テーブル名・内部 ID）を出さず、呼出側で汎用メッセージへ変換する。
+ */
+export class DependencyConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DependencyConfigError";
+  }
+}
+
+/**
+ * 指定商品の有効な依存定義を DB（M_PRODUCT_DEPENDENCY）から取得する。
+ * STATUS=1 かつ DEL_FLG=0 のみ。DB に行が無い商品は「依存なし」（空配列）。
+ */
+async function getProductDependencies(env: Env, productCode: string): Promise<DependencyRow[]> {
+  const db = getDb(env);
+  const res = await db
+    .prepare(
+      `SELECT REQUIRES_CODE, DEPENDENCY_GROUP, SATISFY_MODE
+       FROM M_PRODUCT_DEPENDENCY
+       WHERE PRODUCT_CODE = ? AND STATUS = 1 AND DEL_FLG = 0`,
+    )
+    .bind(productCode)
+    .all<DependencyRow>();
+  return res.results ?? [];
+}
+
+/**
+ * 表示用の依存グループ（グループ内 ANY_OF＋satisfyMode）。
+ * precheck の DEPENDENCY_REQUIRED.details.missingGroups と同一構造にし、フロントの文言生成を共通化する。
+ * こちらは所有状態に依存せず「依存定義そのもの」を表す（Store カードの常時表示用）。
+ */
+export interface DependencyDisplayGroup {
+  /** グループ内候補（いずれか1つで充足＝ANY_OF）。決定的に並べる。 */
+  requiresAnyOf: string[];
+  /** このグループの充足方式。 */
+  satisfyMode: "ENTITLEMENT_ONLY" | "ENTITLEMENT_OR_CART";
+}
+
+/**
+ * DependencyRow[] をグループ構造（DEPENDENCY_GROUP 単位・ANY_OF＋satisfyMode）へ整形する。
+ * グループ内 SATISFY_MODE 混在・未知値は表示情報として安全側に無視（依存案内を出さない）ため空配列を返す。
+ * 依存判定の正本（checkProductDependencies）はこれとは別に厳格判定するので、表示整形はここで完結してよい。
+ */
+function toDisplayGroups(deps: DependencyRow[]): DependencyDisplayGroup[] {
+  if (deps.length === 0) return [];
+  const groups = new Map<number, { candidates: string[]; modes: Set<string> }>();
+  for (const d of deps) {
+    const g = groups.get(d.DEPENDENCY_GROUP) ?? { candidates: [], modes: new Set<string>() };
+    g.candidates.push(d.REQUIRES_CODE);
+    g.modes.add(d.SATISFY_MODE);
+    groups.set(d.DEPENDENCY_GROUP, g);
+  }
+  const out: DependencyDisplayGroup[] = [];
+  for (const { candidates, modes } of groups.values()) {
+    // 表示用途では設定ミス（混在・未知）は案内を出さない安全側に倒す（判定は別途 checkProductDependencies）。
+    if (modes.size !== 1) return [];
+    const mode = [...modes][0];
+    if (mode !== SATISFY_ENTITLEMENT_ONLY && mode !== SATISFY_ENTITLEMENT_OR_CART) return [];
+    out.push({ requiresAnyOf: [...candidates].sort(), satisfyMode: mode });
+  }
+  return out;
+}
+
+/**
+ * 全商品の依存定義を PRODUCT_CODE → 表示グループ配列 で返す（/api/products の依存案内用）。
+ * 依存が無い商品はキーを持たない（呼出側で空配列扱い）。1 クエリでまとめて取得する。
+ */
+export async function getAllProductDependencyGroups(
+  env: Env,
+): Promise<Record<string, DependencyDisplayGroup[]>> {
+  const db = getDb(env);
+  const res = await db
+    .prepare(
+      `SELECT PRODUCT_CODE, REQUIRES_CODE, DEPENDENCY_GROUP, SATISFY_MODE
+       FROM M_PRODUCT_DEPENDENCY
+       WHERE STATUS = 1 AND DEL_FLG = 0
+       ORDER BY PRODUCT_CODE, DEPENDENCY_GROUP, REQUIRES_CODE`,
+    )
+    .all<{ PRODUCT_CODE: string } & DependencyRow>();
+  const byCode = new Map<string, DependencyRow[]>();
+  for (const r of res.results ?? []) {
+    const arr = byCode.get(r.PRODUCT_CODE) ?? [];
+    arr.push({ REQUIRES_CODE: r.REQUIRES_CODE, DEPENDENCY_GROUP: r.DEPENDENCY_GROUP, SATISFY_MODE: r.SATISFY_MODE });
+    byCode.set(r.PRODUCT_CODE, arr);
+  }
+  const out: Record<string, DependencyDisplayGroup[]> = {};
+  for (const [code, deps] of byCode) {
+    const groups = toDisplayGroups(deps);
+    if (groups.length > 0) out[code] = groups;
+  }
+  return out;
+}
+
+/** 依存グラフの 1 エッジ（PRODUCT_CODE → REQUIRES_CODE）。 */
+interface DependencyEdge {
+  PRODUCT_CODE: string;
+  REQUIRES_CODE: string;
+}
+
+/**
+ * M_PRODUCT_DEPENDENCY 全体（有効定義のみ）に循環依存が無いか検証する。
  *
- * @param env 環境
- * @param authUserId 認証済みユーザー
- * @param requestedCodes 今回の注文に含まれる商品コード集合
+ * - 対象は STATUS=1 かつ DEL_FLG=0 の有効依存のみ（無効化・削除済みは含めない）。
+ * - PRODUCT_CODE → REQUIRES_CODE を有向辺とし、DFS の 3 色塗り分けで back edge（循環）を検出する。
+ * - 例: A→B, B→A / A→B, B→C, C→A を循環として検出。自己依存は DB CHECK で登録不可（ここには来ない）。
+ * - 依存テーブルは小規模前提。requested 商品から到達する範囲に限らず全有効依存を検査し、
+ *   到達しない場所の設定ミスも早期に検知する。
+ * - 循環は「依存設定の妥当性」の問題であり entitlement 利用可否には影響させない（本関数は Checkout 依存評価専用）。
+ *
+ * @throws DependencyConfigError 循環が存在するとき
+ */
+export async function assertNoDependencyCycle(env: Env): Promise<void> {
+  const db = getDb(env);
+  const res = await db
+    .prepare(
+      `SELECT PRODUCT_CODE, REQUIRES_CODE
+       FROM M_PRODUCT_DEPENDENCY
+       WHERE STATUS = 1 AND DEL_FLG = 0`,
+    )
+    .all<DependencyEdge>();
+  const edges = res.results ?? [];
+
+  // 隣接リスト（PRODUCT_CODE → その前提 REQUIRES_CODE 群）。
+  const adj = new Map<string, string[]>();
+  for (const e of edges) {
+    const arr = adj.get(e.PRODUCT_CODE) ?? [];
+    arr.push(e.REQUIRES_CODE);
+    adj.set(e.PRODUCT_CODE, arr);
+  }
+
+  // DFS 3 色塗り分け: 0=未訪問 / 1=訪問中（スタック上）/ 2=完了。
+  const color = new Map<string, number>();
+  const dfs = (node: string): boolean => {
+    color.set(node, 1);
+    for (const next of adj.get(node) ?? []) {
+      const c = color.get(next) ?? 0;
+      if (c === 1) return true; // back edge = 循環
+      if (c === 0 && dfs(next)) return true;
+    }
+    color.set(node, 2);
+    return false;
+  };
+
+  for (const node of adj.keys()) {
+    if ((color.get(node) ?? 0) === 0) {
+      if (dfs(node)) {
+        throw new DependencyConfigError("dependency cycle detected in M_PRODUCT_DEPENDENCY");
+      }
+    }
+  }
+}
+
+/**
+ * 商品購入の依存前提を検証する（バックエンド必須。UI 依存にしない）。
+ *
+ * 依存定義の正本は M_PRODUCT_DEPENDENCY（migration 0008）。旧コード固定の PRODUCT_DEPENDENCIES は廃止。
+ *
+ * 判定:
+ *   - まず依存設定全体の妥当性を検証（循環依存なら DependencyConfigError で安全側に停止）。
+ *   - DB に依存定義が無い商品は依存なし（通過）。
+ *   - 依存は DEPENDENCY_GROUP でまとめる。
+ *       グループ内 = ANY_OF（グループ内のいずれかの REQUIRES_CODE を満たせばそのグループは充足）。
+ *       グループ間 = ALL_OF（すべてのグループを充足する必要がある）。
+ *   - 各グループの SATISFY_MODE（充足方法）:
+ *       ENTITLEMENT_OR_CART … 有効 entitlement を所有、または同一注文に前提商品を含めば充足。
+ *       ENTITLEMENT_ONLY    … Checkout 開始前から有効 entitlement を持つ場合のみ充足（同一注文は充足に使わない）。
+ *     同一グループ内で SATISFY_MODE が混在するのは設定ミス（ANY_OF の評価単位が曖昧になる）。
+ *     DependencyConfigError で安全側に停止する（DB 列 CHECK と判定時検証の二重防御）。
+ *   - 「所有」= 有効な T_USER_PRODUCT entitlement（isProductAvailable。購入履歴・注文履歴・Stripe 履歴・
+ *       GRANT_TYPE を問わない＝Admin 直接付与も所有扱い）。
+ *   - 不正な依存（前提商品が M_PRODUCT に存在しない/無効）は充足せず購入不可（安全側）。
+ *
  * @throws AppError DEPENDENCY_REQUIRED(409) 依存前提を満たさないとき
+ * @throws DependencyConfigError 依存設定が不正（循環 / グループ内 SATISFY_MODE 混在）なとき
  */
 export async function checkProductDependencies(
   env: Env,
   authUserId: string,
   requestedCodes: string[],
 ): Promise<void> {
+  // 依存設定全体の妥当性検証（循環依存の検出）。設定ミスを A+B 同時カート等で抜けられないようにする。
+  await assertNoDependencyCycle(env);
+
   const requested = new Set(requestedCodes);
   for (const code of requestedCodes) {
-    const requires = PRODUCT_DEPENDENCIES[code];
-    if (!requires) continue;
-    // 同一注文に前提商品が含まれるなら OK
-    if (requested.has(requires)) continue;
-    // 既に前提商品を保有しているなら OK
-    const hasBase = await isProductAvailable(env, authUserId, requires);
-    if (hasBase) continue;
-    throw new AppError(
-      "DEPENDENCY_REQUIRED",
-      "この商品は、前提となる商品の購入が必要です。",
-      409,
-    );
+    const deps = await getProductDependencies(env, code);
+    if (deps.length === 0) continue; // 依存なし
+
+    // グループごとに前提候補（REQUIRES_CODE）と SATISFY_MODE をまとめる（グループ内 ANY_OF）。
+    const groups = new Map<number, { candidates: string[]; modes: Set<string> }>();
+    for (const d of deps) {
+      const g = groups.get(d.DEPENDENCY_GROUP) ?? { candidates: [], modes: new Set<string>() };
+      g.candidates.push(d.REQUIRES_CODE);
+      g.modes.add(d.SATISFY_MODE);
+      groups.set(d.DEPENDENCY_GROUP, g);
+    }
+
+    // 未充足グループを収集する（グループ間 ALL_OF＝すべて充足が必要）。
+    // 1つでも未充足なら、その購入対象コードと未充足グループ群を添えて DEPENDENCY_REQUIRED を返す。
+    const missingGroups: { requiresAnyOf: string[]; satisfyMode: "ENTITLEMENT_ONLY" | "ENTITLEMENT_OR_CART" }[] = [];
+    for (const { candidates, modes } of groups.values()) {
+      // 同一グループ内は同一 SATISFY_MODE でなければならない（混在は設定ミス）。
+      if (modes.size !== 1) {
+        throw new DependencyConfigError(
+          `mixed SATISFY_MODE in a dependency group for product: ${code}`,
+        );
+      }
+      const mode = [...modes][0];
+      // 既知の SATISFY_MODE のみ許可（DB CHECK と二重防御。未知値は設定エラー）。
+      if (mode !== SATISFY_ENTITLEMENT_ONLY && mode !== SATISFY_ENTITLEMENT_OR_CART) {
+        throw new DependencyConfigError(`unknown SATISFY_MODE '${mode}' for product: ${code}`);
+      }
+      const allowCart = mode === SATISFY_ENTITLEMENT_OR_CART;
+
+      let satisfied = false;
+      for (const requires of candidates) {
+        // ENTITLEMENT_OR_CART のときのみ、同一注文（同時購入）に前提商品を含めば充足を許可。
+        if (allowCart && requested.has(requires)) {
+          satisfied = true;
+          break;
+        }
+        // いずれのモードでも、有効 entitlement を所有していれば充足。
+        const hasBase = await isProductAvailable(env, authUserId, requires);
+        if (hasBase) {
+          satisfied = true;
+          break;
+        }
+      }
+      if (!satisfied) {
+        // グループ内候補（ANY_OF）を、判定順に依存しないよう決定的に並べる。
+        // satisfyMode を添え、フロントが「事前購入必須」か「同時選択可」かを文言に反映できるようにする。
+        missingGroups.push({
+          requiresAnyOf: [...candidates].sort(),
+          satisfyMode: mode,
+        });
+      }
+    }
+    if (missingGroups.length > 0) {
+      // 購入対象コード（code）＋未充足グループ（ALL_OF）を details に載せる。
+      // フロントは PRODUCT_NAME へ変換して「◯◯を購入するには△△が必要」を表示する。
+      throw new DependencyRequiredError({ productCode: code, missingGroups });
+    }
   }
 }
 
@@ -201,9 +427,9 @@ export interface MultiCheckoutPrecheck {
  * 検証（api/PURCHASE_API.md）:
  * 1. M_USER 有効（停止・退会・仮登録は不可）
  * 2. 各 PRODUCT_CODE が M_PRODUCT に存在（有効商品）
- * 3. 各商品が販売対象（Stripe Price Secret が設定済み）
+ * 3. 各商品が販売対象（M_PRODUCT の PURCHASE_ENABLED / STRIPE_PRICE_ID が設定済み）
  * 4. 二重購入防止（既に available な商品を含めない）
- * 5. 依存条件（EARTH ← HANABI）
+ * 5. 商品依存条件（M_PRODUCT_DEPENDENCY を正本とする汎用依存判定）
  * 6. M_PRODUCT.SORT_NO ASC, PRODUCT_ID ASC で決定的に正規化
  *
  * 呼出前提: productCodes は「配列・非空・重複なし」を呼出側で検証済み。
@@ -231,12 +457,43 @@ export async function precheckMultiCheckout(
     if (!product) {
       throw new AppError("PRODUCT_NOT_FOUND", "商品が見つかりません。", 404);
     }
-    // 3. 販売対象（Price 設定済み）
-    const priceId = resolvePriceId(env, code);
+    // 3. 新規販売中か（販売可否の正本 = M_PRODUCT の販売専用列。migration 0007）。
+    //    STATUS=1・DEL_FLG=0 は getActiveProductByCode で担保済み。ここで PURCHASE_ENABLED を確認。
+    //    商品コードの個別 if 分岐は使わない。集合に 1 つでも未発売が含まれれば注文全体を
+    //    Stripe 呼び出し前に拒否（部分成功なし）。
+    if (product.PURCHASE_ENABLED !== 1) {
+      throw new AppError("PRODUCT_NOT_SELLABLE", "現在購入できない商品が含まれています。", 409);
+    }
+    // 3b. 販売方式。現行 Checkout 基盤は買い切り（ONE_TIME）のみ対応。
+    //     SUBSCRIPTION は将来対応。今は安全側で拒否し、誤って Session を作らせない。
+    if (product.SALE_TYPE !== SALE_TYPE_ONE_TIME) {
+      throw new AppError(
+        "SALE_TYPE_NOT_SUPPORTED",
+        "現在この販売方式には対応していません。",
+        409,
+      );
+    }
+    // 4. 販売対象（Stripe Price ID が M_PRODUCT に設定済みか）。
+    //    Price ID の正本は DB（M_PRODUCT.STRIPE_PRICE_ID）。env の商品別 Price 参照は廃止した。
+    //    NULL/空 = 販売設定未完了として、Stripe API 呼び出し前に安全に拒否する。
+    const priceId = product.STRIPE_PRICE_ID;
     if (!priceId) {
       throw new AppError("PRODUCT_NOT_SELLABLE", "現在購入できない商品が含まれています。", 409);
     }
-    // 4. 二重購入防止
+    // 4b. Price ID 重複検知（Checkout 前の安全網）。
+    //     一意性の正本は DB の部分 UNIQUE INDEX（UX_PRODUCT_STRIPE_PRICE_ID）だが、
+    //     既存 DB や異常データに備え、同一カート内で同じ Price ID が複数商品に割り当たる場合は
+    //     Stripe Session 作成前に拒否する（決済後 Webhook で初めて気付く事態を避ける）。
+    for (const [seenCode, seenPrice] of priceIdByCode) {
+      if (seenPrice === priceId && seenCode !== code) {
+        throw new AppError(
+          "PRODUCT_NOT_SELLABLE",
+          "現在購入できない商品が含まれています。",
+          409,
+        );
+      }
+    }
+    // 5. 二重購入防止
     const available = await isProductAvailable(env, authUserId, code);
     if (available) {
       throw new AppError("ALREADY_PURCHASED", "既に利用可能な商品が含まれています。", 409);
@@ -245,7 +502,7 @@ export async function precheckMultiCheckout(
     priceIdByCode.set(code, priceId);
   }
 
-  // 5. 依存条件（EARTH ← HANABI）
+  // 5. 商品依存条件（M_PRODUCT_DEPENDENCY を正本とする汎用依存判定）
   await checkProductDependencies(env, authUserId, productCodes);
 
   // 6. SORT_NO ASC, PRODUCT_ID ASC で決定的に正規化（API の配列順は正本にしない）

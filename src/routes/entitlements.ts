@@ -42,7 +42,13 @@ export async function handleEntitlement(request: Request, env: Env, code: string
   // 設定値異常は内部設定エラー。利用者へ詳細を返さず 500（判定自体は成功しているが
   // 記録の一貫性を欠くため内部エラーとして扱い、内部詳細は返さない）。
   try {
-    await recordEntitlementAccess(request, env, result.auth.authUserId, result.product.PRODUCT_ID);
+    await recordEntitlementAccess(
+      request,
+      env,
+      result.auth.authUserId,
+      result.product.PRODUCT_ID,
+      result.auth.sessionId,
+    );
   } catch (err) {
     if (err instanceof AccessLogSettingError) {
       console.error("[entitlement] access log setting error:", err.message);

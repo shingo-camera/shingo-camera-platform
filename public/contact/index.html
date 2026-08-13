@@ -9,7 +9,8 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16.png" />
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png" />
   <meta name="robots" content="noindex" />
-  <title>お問い合わせ — shingo_camera</title>
+  <meta http-equiv="refresh" content="0; url=/support/" />
+  <title>お問い合わせ — shingo_camera LABO</title>
   <link rel="stylesheet" href="/assets/site.css" />
   <script src="/assets/vendor/supabase.js"></script>
   <script src="/assets/site-config.js"></script>
@@ -21,12 +22,16 @@
   <main>
     <div class="doc">
       <h1>お問い合わせ</h1>
-      <p class="lead">お問い合わせ手段は確定後に掲載します。</p>
-      <!-- 問い合わせ手段（mailto or 外部フォーム）は site-config.js の contact から描画。未確定なら準備中表示。 -->
-      <div id="contact-method"></div>
+      <p class="lead">お問い合わせ窓口は SUPPORT へ移動しました。</p>
+      <p>自動的に移動しない場合は、次のリンクからお進みください。</p>
+      <p><a href="/support/" class="btn btn-primary">SUPPORT へ移動する</a></p>
     </div>
   </main>
 
   <footer id="site-footer" class="site-footer"></footer>
+  <script>
+    // JS 有効時は即時に /support/ へ遷移（meta refresh のフォールバック併用）。
+    try { window.location.replace("/support/"); } catch (e) { window.location.href = "/support/"; }
+  </script>
 </body>
 </html>

@@ -43,9 +43,19 @@ export interface AuthContext {
   authUserId: string;
   /** JWT に含まれるメール（存在すれば）。同期時の参考にする（正本判定は sub） */
   email: string | null;
+  /**
+   * 検証済み JWT の session_id クレーム（Supabase access token に含まれる）。
+   * 同一ログインセッションで安定し、別セッションでは異なる。UUID 形式を検証済み。
+   * クレーム欠落・形式不正なら null（安全側。ログの SESSION_ID_HASH は NULL になる）。
+   * 生の session_id は保存に使わない（サーバー側でハッシュ化してから保存する）。
+   */
+  sessionId: string | null;
   /** 検証済みの生 payload（必要な追加クレーム参照用） */
   payload: JWTPayload;
 }
+
+/** session_id クレームの形式（Supabase は UUID）。緩めに UUID 一般形を許容する。 */
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * SUPABASE_URL から JWKS の URL を生成する。
@@ -164,5 +174,14 @@ export async function requireUser(request: Request, env: Env): Promise<AuthConte
       ? payload.email
       : null;
 
-  return { authUserId: sub, email, payload };
+  // session_id クレーム（Supabase access token に含まれる）。検証済み payload から取得し、
+  // UUID 形式を確認する。欠落・不正形式は null（安全側。SESSION_ID_HASH は NULL になる）。
+  // 生の session_id は保存に使わず、呼出側でサーバー鍵によりハッシュ化する。
+  const rawSessionId = payload["session_id"];
+  const sessionId =
+    typeof rawSessionId === "string" && SESSION_ID_RE.test(rawSessionId.trim())
+      ? rawSessionId.trim()
+      : null;
+
+  return { authUserId: sub, email, sessionId, payload };
 }

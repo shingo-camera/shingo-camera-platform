@@ -27,7 +27,7 @@ import {
   handleAdminWarnings,
   handleAdminWarningUpdate,
 } from "./routes/admin";
-import { handleCheckout, handlePurchaseStatus, handleActiveCheckout, handleRecover, handleCancel } from "./routes/purchases";
+import { handleCheckout, handlePurchaseStatus, handleActiveCheckout, handleRecover, handleCancel, handlePrecheckDependency } from "./routes/purchases";
 import {
   handleAdminReconcile,
   handleAdminOrders,
@@ -38,11 +38,13 @@ import { handleAdminResetPurchases } from "./routes/admin_test";
 import { handleStripeWebhook } from "./routes/stripe_webhook";
 import { handleNoteApply, handleNoteStatus } from "./routes/migrations";
 import { handleNoteImport, handleNoteList, handleNoteUpdate } from "./routes/admin_note";
+import { handleSupportContact } from "./routes/support";
 import { withErrorHandling } from "./shared/errors";
 import { jsonError } from "./shared/response";
 import { runWarningJob } from "./shared/warning_job";
 import { handleSunAndMoonApi } from "./apps/sun-and-moon/router";
 import { handleSunAndMoonAppStart } from "./apps/sun-and-moon/app_start";
+import { handleSunAndMoonHeartbeat } from "./apps/sun-and-moon/heartbeat";
 
 /**
  * 環境変数・Secrets のバインディング型。
@@ -58,13 +60,19 @@ export interface Env {
   // パラメータが変わり得るため、環境固定値を正本とする。例: https://platform.example.com）
   APP_BASE_URL?: string;
   // Stripe（Cloudflare Secrets / Local は .dev.vars。実値を Git/toml に書かない）
+  // 商品別 Price ID は M_PRODUCT.STRIPE_PRICE_ID（DB）へ移行済み。env の商品別 Price は持たない。
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
-  STRIPE_PRICE_SUN_AND_MOON?: string;
-  STRIPE_PRICE_HANABI?: string;
-  STRIPE_PRICE_HANABI_GOOGLE_EARTH?: string;
   // Resend（Warning 通知メール用。Cloudflare Secret / Local は .dev.vars。実値を Git/toml に書かない）
   MAIL_API_KEY?: string;
+  // SUPPORT 問い合わせの通知先（任意）。未設定時は管理者通知先（ADMIN_AUTH_USER_ID の LOGIN_MAIL）を使う。
+  // 実値は Cloudflare 環境変数 / .dev.vars で設定し、Git/toml に書かない。
+  SUPPORT_NOTIFY_EMAIL?: string;
+  // session_id を SESSION_ID_HASH へ保存する際の HMAC 鍵（サーバー側の秘密）。
+  // 生の session_id を保存せず、この鍵で HMAC-SHA256 して保存する（鍵を知らないと逆算・照合できない）。
+  // 未設定なら SESSION_ID_HASH は NULL のまま（記録は継続。不正検知の補助情報が減るだけ）。
+  // 実値は Cloudflare Secret / .dev.vars で設定し、Git/toml に書かない。
+  SESSION_ID_HASH_SECRET?: string;
 }
 
 /**
@@ -97,6 +105,9 @@ function route(request: Request, env: Env, ctx: ExecutionContext): Response | Pr
   // 静的・固定パス
   if (method === "GET" && pathname === "/api/health") return handleHealth(env);
   if (method === "GET" && pathname === "/api/config") return handleConfig(env);
+
+  // Support（ページ閲覧は誰でも可。問い合わせ送信は requireUser で認証必須。特商法の開示請求も受付）
+  if (method === "POST" && pathname === "/api/support/contact") return handleSupportContact(request, env);
 
   // Account
   if (method === "POST" && pathname === "/api/account/sync") return handleAccountSync(request, env);
@@ -133,6 +144,11 @@ function route(request: Request, env: Env, ctx: ExecutionContext): Response | Pr
   if (method === "POST" && pathname === "/api/apps/sun-and-moon/app-start") {
     return handleSunAndMoonAppStart(request, env);
   }
+  // 継続利用中の低頻度セッション観測（PERIODIC_CHECK アクセスログ）。
+  // ログインしっぱなしでも利用地点・セッションを再観測するための heartbeat。entitlement は変更しない。
+  if (method === "POST" && pathname === "/api/apps/sun-and-moon/heartbeat") {
+    return handleSunAndMoonHeartbeat(request, env);
+  }
   // 計算API群: /api/apps/sun-and-moon/{name}
   //   各APIは requireProduct(SUN_AND_MOON) を通す（router 内）。アクセスログは記録しない。
   if (pathname.startsWith("/api/apps/sun-and-moon/")) {
@@ -152,6 +168,10 @@ function route(request: Request, env: Env, ctx: ExecutionContext): Response | Pr
   // Purchases（Stripe）
   if (method === "POST" && pathname === "/api/purchases/checkout") {
     return handleCheckout(request, env);
+  }
+  // 依存条件のみ事前確認（Checkout Session を作らない UX 改善用・購入実行時の依存チェックは別途必須）
+  if (method === "POST" && pathname === "/api/purchases/precheck-dependency") {
+    return handlePrecheckDependency(request, env);
   }
   if (method === "GET" && pathname === "/api/purchases/status") {
     return handlePurchaseStatus(request, env);

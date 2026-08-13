@@ -28,6 +28,7 @@ import {
   markAttemptPaidWithSession,
   getAttemptByOperationId,
   getAttemptItems,
+  buildPriceIdToCodeMapFromAttempt,
   buildCartKey,
   ATTEMPT_STATUS,
   PAYMENT_EVENT_TYPE,
@@ -124,11 +125,6 @@ export async function retrieveAndValidateCheckoutSession(
 ): Promise<ValidatedSession> {
   const stripe = getStripe(env);
 
-  const priceIdToCode = buildPriceIdToCodeMap(env); // PriceConfigError は呼出側で処理
-  if (priceIdToCode.size === 0) {
-    return { ok: false, reason: "invalid_session", detail: "no price ids configured" };
-  }
-
   let full: Stripe.Checkout.Session;
   try {
     full = await stripe.checkout.sessions.retrieve(sessionId, {
@@ -145,6 +141,31 @@ export async function retrieveAndValidateCheckoutSession(
   const authUserId = full.metadata?.auth_user_id;
   if (!authUserId) {
     return { ok: false, reason: "invalid_session", detail: "metadata auth_user_id missing" };
+  }
+
+  const clientReferenceId =
+    typeof full.client_reference_id === "string" ? full.client_reference_id : null;
+
+  // Price ID → 商品コードの逆引きは「Checkout 開始時に保存した attempt snapshot」を正本にする。
+  // これにより、Checkout 開始後に M_PRODUCT.STRIPE_PRICE_ID が変更されても、旧 Session の
+  // line item price を snapshot から正しく解決でき、決済済み Session を正常 fulfill できる。
+  const snap = await buildPriceIdToCodeMapFromAttempt(env, full.id, clientReferenceId);
+  let priceIdToCode: Map<string, string>;
+  if (snap.status === "resolved") {
+    // 通常経路: snapshot を正本に解決。現在の M_PRODUCT には一切依存しない。
+    priceIdToCode = snap.map;
+  } else if (snap.status === "invalid") {
+    // attempt は特定できたが snapshot が不正（item なし / 空 Price / 重複割当）。
+    // ここで現在の M_PRODUCT へ fallback すると Price 変更後に誤付与し得るため、安全側でエラーにする。
+    return { ok: false, reason: "invalid_session", detail: `attempt snapshot invalid: ${snap.detail}` };
+  } else {
+    // not_found: SID / operationId のどちらでも attempt を特定できない、限定された互換経路のみ。
+    // 新方式の正常な Checkout では attempt + snapshot が必ず存在するため通常ここには来ない。
+    // この場合に限り、unknown price で権限付与不能になるのを避けるため現在の M_PRODUCT で解決を試みる。
+    priceIdToCode = await buildPriceIdToCodeMap(env);
+  }
+  if (priceIdToCode.size === 0) {
+    return { ok: false, reason: "invalid_session", detail: "no price ids configured" };
   }
 
   const verified = verifyLineItemsAndResolve(full, priceIdToCode);
@@ -175,7 +196,7 @@ export async function retrieveAndValidateCheckoutSession(
     totalAmount: typeof full.amount_total === "number" ? full.amount_total : 0,
     purchaseDate: typeof full.created === "number" ? epochToJstIso(full.created) : nowIso(),
     paymentIntentId,
-    clientReferenceId: typeof full.client_reference_id === "string" ? full.client_reference_id : null,
+    clientReferenceId,
     items,
   };
 }

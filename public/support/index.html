@@ -9,7 +9,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16.png" />
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png" />
   <meta name="robots" content="noindex" />
-  <title>Support — shingo_camera</title>
+  <title>Support — shingo_camera LABO</title>
   <link rel="stylesheet" href="/assets/site.css" />
   <script src="/assets/vendor/supabase.js"></script>
   <script src="/assets/site-config.js"></script>
@@ -20,24 +20,226 @@
 
   <main>
     <div class="doc">
-      <h1>サポート</h1>
-      <p class="lead">ご利用に関するご案内。</p>
+      <h1>SUPPORT</h1>
+      <p class="lead">shingo_camera LABO および各PLANNER製品に関するお問い合わせを受け付けています。</p>
 
       <h2>使い方</h2>
-      <p class="text-muted">HANABI PLANNER の詳しい使い方は note の記事からご確認いただけます。 <a data-note-link="hanabi" target="_blank" rel="noopener noreferrer">記事を見る（note）</a></p>
-      <p class="text-muted">HANABI PLANNER Google Earth 連携の詳しい使い方は note の記事からご確認いただけます。 <a data-note-link="hanabiEarth" target="_blank" rel="noopener noreferrer">記事を見る（note）</a></p>
-      <p class="text-muted">SUN AND MOON PLANNER の使い方記事は現在準備中です。</p>
+      <p>HANABI PLANNER の詳しい使い方は note の記事からご確認いただけます。 <a data-note-link="hanabi" target="_blank" rel="noopener noreferrer">記事を見る（note）</a></p>
+      <p>HANABI PLANNER Google Earth 連携の詳しい使い方は note の記事からご確認いただけます。 <a data-note-link="hanabiEarth" target="_blank" rel="noopener noreferrer">記事を見る（note）</a></p>
+      <p>SUN AND MOON PLANNER の使い方記事は現在準備中です。</p>
 
-      <h2>よくある質問</h2>
-      <p class="text-muted">準備中です。</p>
+      <h2>お問い合わせの前に</h2>
+      <p>お問い合わせの際は、問題の確認に必要な範囲で、次の情報をお知らせください。</p>
+      <ul>
+        <li>対象の商品名</li>
+        <li>利用している端末・OS・ブラウザ</li>
+        <li>発生している問題の内容</li>
+        <li>エラーメッセージが表示されている場合はその内容</li>
+        <li>問題が発生するまでの操作手順</li>
+      </ul>
+      <p><strong>パスワード、クレジットカード番号、カードのセキュリティコード等は送信しないでください。</strong></p>
 
-      <h2>お問い合わせ</h2>
-      <p class="text-muted">下記よりお問い合わせいただけます。</p>
-      <div id="contact-method"></div>
-      <p class="mt-24"><a href="/contact/">お問い合わせページへ</a></p>
+      <h2>購入・利用権について</h2>
+      <p>決済が完了したにもかかわらず商品を利用できない場合や、購入済み商品がMY PAGEへ反映されない場合は、SUPPORTよりお問い合わせください。</p>
+      <p>確認の際は、購入に使用したアカウントを特定できる情報が必要となる場合があります。</p>
+
+      <h2>不具合について</h2>
+      <p>本サービスは、別途明示する一部機能を除きインターネット接続を前提とします。通信圏外や通信障害等では利用できない場合があり、全機能のオフライン動作を保証するものではありません。</p>
+      <p>不具合をご連絡いただく際は、可能であれば発生状況や再現手順をお知らせください。</p>
+      <p>すべての環境で同一の動作を保証するものではありませんが、確認可能な範囲で調査・対応します。</p>
+
+      <h2>撮影計画について</h2>
+      <p>各PLANNERは撮影計画を支援するツールです。計算結果やシミュレーション結果は、実際の撮影結果を保証するものではありません。</p>
+      <p>撮影地の立入可否、施設ルール、交通規則、安全性、天候その他の現地条件については、利用者自身で確認してください。</p>
+
+      <h2>お問い合わせ窓口</h2>
+      <p>お問い合わせの送信にはログインが必要です。アカウントをお持ちでない場合は、無料でアカウントを作成できます。ご返信は、ログインされているアカウントの登録メールアドレス宛にお送りします。</p>
+      <p class="note">パスワード、クレジットカード番号、セキュリティコード等を送信しないでください。</p>
+
+      <!-- 未ログイン時の案内（既定表示。JS がログイン済みを確認したら非表示にしてフォームを表示） -->
+      <div id="support-login-gate" class="support-gate">
+        <p>お問い合わせフォームを利用するにはログインしてください。</p>
+        <div class="gate-actions">
+          <a id="sf-login" class="btn btn-primary" href="/login/">ログイン</a>
+          <a id="sf-signup" class="btn btn-ghost" href="/signup/">アカウント作成</a>
+        </div>
+      </div>
+
+      <!-- ログイン済みでのみ表示。既定は hidden。返信先メールは認証から確定するため入力欄なし。 -->
+      <form id="support-form" class="support-form hidden" novalidate>
+        <div class="field">
+          <label for="sf-category">お問い合わせ種別 <span class="req">必須</span></label>
+          <select id="sf-category" name="category" required>
+            <option value="">選択してください</option>
+            <option value="purchase">購入・利用権</option>
+            <option value="bug">不具合</option>
+            <option value="disclosure">販売事業者情報の開示請求</option>
+            <option value="account">アカウント・セキュリティ</option>
+            <option value="other">その他</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="sf-product">対象商品 <span class="opt">任意</span></label>
+          <input type="text" id="sf-product" name="product" maxlength="80" placeholder="例: SUN AND MOON PLANNER" />
+        </div>
+
+        <div class="field">
+          <label for="sf-subject">件名 <span class="opt">任意</span></label>
+          <input type="text" id="sf-subject" name="subject" maxlength="120" />
+        </div>
+
+        <div class="field">
+          <label for="sf-body">お問い合わせ内容 <span class="req">必須</span></label>
+          <textarea id="sf-body" name="body" rows="8" required maxlength="4000"></textarea>
+        </div>
+
+        <!-- honeypot: 通常利用者には見えない。bot が埋めることを期待する隠しフィールド -->
+        <div class="hp-field" aria-hidden="true">
+          <label for="sf-website">Website</label>
+          <input type="text" id="sf-website" name="website" tabindex="-1" autocomplete="off" />
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" id="sf-submit" class="btn btn-primary">送信する</button>
+        </div>
+
+        <p id="sf-status" class="sf-status" role="status" aria-live="polite"></p>
+      </form>
     </div>
   </main>
 
   <footer id="site-footer" class="site-footer"></footer>
+
+  <script>
+  // SUPPORT 問い合わせフォーム。既存の Supabase セッション（site-config が初期化する
+  // window.supabase クライアント）を再利用してログイン状態を判定し、認証必須で送信する。
+  // 新しい認証方式は作らない。返信先メールは送らない（サーバーが認証から確定する）。
+  (function () {
+    var gate = document.getElementById("support-login-gate");
+    var form = document.getElementById("support-form");
+    if (!gate || !form) return;
+
+    var loginA = document.getElementById("sf-login");
+    var signupA = document.getElementById("sf-signup");
+    var btn = document.getElementById("sf-submit");
+    var statusEl = document.getElementById("sf-status");
+    var sending = false;
+
+    // ログイン後に /support/ へ戻す redirect を付与
+    var redir = encodeURIComponent("/support/");
+    if (loginA) loginA.href = "/login/?redirect=" + redir;
+    if (signupA) signupA.href = "/signup/?redirect=" + redir;
+
+    function setStatus(msg, kind) {
+      statusEl.textContent = msg;
+      statusEl.className = "sf-status" + (kind ? " " + kind : "");
+    }
+
+    // 既存の site.js が公開する認証ヘルパ（Supabase セッション→access_token）を再利用。
+    // 新しい認証方式は作らない。site.js は defer で読み込まれるため、準備完了を待つ。
+    async function getToken() {
+      try {
+        // site.js の defer 実行完了まで最大数回リトライ
+        for (var i = 0; i < 40; i++) {
+          if (window.SiteAuth && typeof window.SiteAuth.getToken === "function") {
+            return await window.SiteAuth.getToken();
+          }
+          await new Promise(function (r) { setTimeout(r, 50); });
+        }
+        return null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    var currentToken = null;
+
+    async function initGate() {
+      currentToken = await getToken();
+      if (currentToken) {
+        gate.classList.add("hidden");
+        form.classList.remove("hidden");
+      } else {
+        gate.classList.remove("hidden");
+        form.classList.add("hidden");
+      }
+    }
+
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      if (sending) return; // 二重送信防止
+
+      // 送信直前に最新トークンを再取得（セッション切れ対策）
+      currentToken = await getToken();
+      if (!currentToken) {
+        setStatus("ログインの有効期限が切れました。再度ログインしてください。", "err");
+        gate.classList.remove("hidden");
+        form.classList.add("hidden");
+        return;
+      }
+
+      var category = document.getElementById("sf-category").value;
+      var body = document.getElementById("sf-body").value.trim();
+      if (!category) { setStatus("お問い合わせ種別を選択してください。", "err"); return; }
+      if (!body) { setStatus("お問い合わせ内容を入力してください。", "err"); return; }
+
+      var payload = {
+        category: category,
+        product: document.getElementById("sf-product").value.trim(),
+        subject: document.getElementById("sf-subject").value.trim(),
+        body: body,
+        website: document.getElementById("sf-website").value, // honeypot
+      };
+
+      sending = true;
+      btn.disabled = true;
+      setStatus("送信しています…", "");
+
+      try {
+        var res = await fetch("/api/support/contact", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + currentToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (res.status === 401) {
+          setStatus("ログインが必要です。再度ログインしてください。", "err");
+          gate.classList.remove("hidden");
+          form.classList.add("hidden");
+          btn.disabled = false;
+          return;
+        }
+        if (res.ok) {
+          var okData = null;
+          try { okData = await res.json(); } catch (_) {}
+          form.reset();
+          var msg = "お問い合わせを受け付けました。内容を確認のうえ、順次対応いたします。";
+          if (okData && okData.acknowledgementSent === false) {
+            msg += "（確認メールの送信に問題が発生した可能性がありますが、お問い合わせ自体は受け付けています。）";
+          }
+          setStatus(msg, "ok");
+        } else {
+          var data = null;
+          try { data = await res.json(); } catch (_) {}
+          var emsg = (data && data.error && data.error.message)
+            ? data.error.message
+            : "送信に失敗しました。時間をおいて再度お試しください。";
+          setStatus(emsg, "err");
+          btn.disabled = false; // 再試行可能
+        }
+      } catch (_) {
+        setStatus("送信に失敗しました。通信環境をご確認のうえ、再度お試しください。", "err");
+        btn.disabled = false;
+      } finally {
+        sending = false;
+      }
+    });
+
+    initGate();
+  })();
+  </script>
 </body>
 </html>

@@ -589,14 +589,18 @@ test("[実ファイル] 商品説明に note 案内文が含まれない（§4�
 
 /* §5/§6: STORE の Earth のみ常時依存文・動的同義警告なし */
 test("[実ファイル] 依存条件は STORE カード限定の常時表示で、二重表示しない（§5/§6）", () => {
-  // depNoticeHtml は dependsOn がある商品のみ・storeSelectRow だけが使用
+  // depNoticeHtml は M_PRODUCT_DEPENDENCY 正本（dependencies）を使い・storeSelectRow だけが使用
   assert.match(siteJsD, /function depNoticeHtml/);
-  assert.match(siteJsD, /ご利用には ' \+ esc\(depName\) \+ ' が必要です。/);
+  // 依存案内文は dependencyNotice（PRODUCT_NAME ベース）で生成する
+  assert.match(siteJsD, /function dependencyNotice/);
+  assert.match(siteJsD, /ご購入には/);
+  // 固定の dependsOn 正本は使わない（コード参照なし）
+  assert.doesNotMatch(siteJsD, /meta\.dependsOn/);
   const store = siteJsD.match(/function storeSelectRow[\s\S]*?\n  \}/)[0];
   assert.match(store, /depNoticeHtml\(meta\)/);
   const lc = siteJsD.match(/function launchCardHtml[\s\S]*?\n  \}/)[0];
   assert.doesNotMatch(lc, /depNoticeHtml/);
-  assert.doesNotMatch(indexHtmlD, /ご利用には/);
+  assert.doesNotMatch(indexHtmlD, /ご購入には/);
   // 旧・動的 dep-note（同義警告の二重表示源）は廃止
   assert.doesNotMatch(siteJsD, /dep-note/);
 });

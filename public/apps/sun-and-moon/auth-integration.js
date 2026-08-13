@@ -130,6 +130,67 @@
   window.SMApi = SMApi;
   window.SMAuth = { getToken: getToken, getDeviceId: function () { return deviceId; }, guardAppStart: guardAppStart };
 
+  // ---- 継続利用中の低頻度セッション観測（heartbeat）----
+  // ログインしたまま長時間利用していても、利用地点・セッションを再観測するために
+  // POST /api/apps/sun-and-moon/heartbeat を低頻度で送る（サーバ側で ACCESS_TYPE=2 を既存抑制付き記録）。
+  //
+  // 方針:
+  // - 間隔は既存 ACCESS_LOG_INTERVAL_MIN（既定60分）と整合させ 60分。サーバ側でも同抑制がかかる。
+  // - ページ表示中(visible)のみタイマーを動かす。非表示・離脱中は送らない（バックグラウンド無限送信をしない・
+  //   閉じている間の追跡はしない）。表示へ復帰したら再開する。
+  // - 失敗してもアプリ本体の利用を妨げない（送信は best-effort）。
+  var HEARTBEAT_INTERVAL_MS = 60 * 60 * 1000; // 60分（ACCESS_LOG_INTERVAL_MIN と整合）
+  var heartbeatTimer = null;
+
+  async function sendHeartbeat() {
+    try {
+      var token = await getToken();
+      if (!token) return; // 未ログインなら送らない（サーバも requireProduct で拒否する）。
+      await fetch(API_BASE + "heartbeat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Device-Id": deviceId, "Authorization": "Bearer " + token },
+        keepalive: false,
+      });
+    } catch (e) {
+      // best-effort。失敗はアプリ利用を妨げない。
+    }
+  }
+
+  function startHeartbeat() {
+    if (heartbeatTimer !== null) return;
+    heartbeatTimer = setInterval(function () {
+      // タイマー発火時に非表示なら送らない（保険。通常は stop 済み）。
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      sendHeartbeat();
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatTimer !== null) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  }
+
+  function initHeartbeat() {
+    // 表示状態に応じて開始/停止。起動直後は app-start が観測点になるため、
+    // ここでは即時送信せず 60分後の最初のタイマーから送る（起動直後の二重記録を避ける）。
+    try {
+      if (typeof document !== "undefined" && document.addEventListener) {
+        document.addEventListener("visibilitychange", function () {
+          if (document.visibilityState === "visible") {
+            startHeartbeat();
+          } else {
+            stopHeartbeat();
+          }
+        });
+      }
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        startHeartbeat();
+      }
+    } catch (e) { /* noop */ }
+  }
+
   // 認証ゲート解除: 本体を表示する（html.sm-auth-gate を外す）。
   function revealApp() {
     try { document.documentElement.classList.remove("sm-auth-gate"); } catch (e) { /* noop */ }
@@ -141,7 +202,10 @@
   function boot() {
     guardAppStart()
       .then(function (ok) {
-        if (ok) revealApp();
+        if (ok) {
+          revealApp();
+          initHeartbeat(); // 権限ありのときのみ継続観測を開始する。
+        }
         // ok === false のときは location 遷移中。ゲートは維持したまま。
       })
       .catch(function () {

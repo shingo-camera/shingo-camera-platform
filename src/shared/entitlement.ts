@@ -22,6 +22,7 @@ import { getMUser } from "./account";
 import { getSystemSetting } from "./settings";
 import { writeAccessLog, ACCESS_TYPE, type AccessType } from "./logs";
 import { getDeviceId } from "./device";
+import { computeSessionIdHash } from "./session_hash";
 import { nowIso } from "./datetime";
 import type { Env } from "../index";
 
@@ -39,6 +40,16 @@ export interface ProductRow {
   STATUS: number;
   SORT_NO: number;
   DEL_FLG: number;
+  /** 販売受付 ON/OFF（0=準備中/1=購入可能）。販売可否の正本。entitlement とは無関係。 */
+  PURCHASE_ENABLED: number;
+  /** 'ONE_TIME'=買い切り / 'SUBSCRIPTION'=サブスク。現行 Checkout は ONE_TIME のみ対応。 */
+  SALE_TYPE: string;
+  /** 表示用金額（税込想定）。実課金額の正本ではない（Stripe Price が正本）。 */
+  DISPLAY_PRICE: number | null;
+  /** ONE_TIME は NULL。SUBSCRIPTION は 'MONTH'/'YEAR' 等。 */
+  BILLING_INTERVAL: string | null;
+  /** Stripe Price オブジェクト識別子（price_xxx）。Checkout/Webhook 逆引きの正本。公開 API へ返さない。NULL=販売設定未完了。 */
+  STRIPE_PRICE_ID: string | null;
 }
 
 /** 権限行（T_USER_PRODUCT の一部） */
@@ -56,6 +67,14 @@ export interface ProductEntitlement {
   granted: boolean;
   available: boolean;
   status: number | null;
+  /** 新規購入受付 ON/OFF（DB 正本）。STORE の購入可否判断に使う。entitlement とは別。 */
+  purchaseEnabled: boolean;
+  /** 'ONE_TIME' / 'SUBSCRIPTION'。 */
+  saleType: string;
+  /** 表示用金額（税込想定・整数）。実課金額は Stripe Price が正本。 */
+  displayPrice: number | null;
+  /** ONE_TIME は null。SUBSCRIPTION は 'MONTH'/'YEAR' 等。 */
+  billingInterval: string | null;
 }
 
 /** me で返す1商品（available 詳細付き） */
@@ -107,6 +126,8 @@ export async function listProductEntitlements(
   const rows = await db
     .prepare(
       `SELECT p.PRODUCT_CODE AS code, p.PRODUCT_NAME AS name,
+              p.PURCHASE_ENABLED AS purchaseEnabled, p.SALE_TYPE AS saleType,
+              p.DISPLAY_PRICE AS displayPrice, p.BILLING_INTERVAL AS billingInterval,
               up.STATUS AS upStatus, up.START_DATE AS startDate,
               up.END_DATE AS endDate, up.DEL_FLG AS upDel
        FROM M_PRODUCT p
@@ -119,6 +140,10 @@ export async function listProductEntitlements(
     .all<{
       code: string;
       name: string;
+      purchaseEnabled: number;
+      saleType: string;
+      displayPrice: number | null;
+      billingInterval: string | null;
       upStatus: number | null;
       startDate: string | null;
       endDate: string | null;
@@ -141,6 +166,12 @@ export async function listProductEntitlements(
       granted,
       available,
       status: r.upStatus,
+      // 販売情報（DB 正本）。STORE 表示・購入可否判断はこれを使う。
+      // Stripe Price ID・Secret は含めない（公開情報のみ）。
+      purchaseEnabled: r.purchaseEnabled === 1,
+      saleType: r.saleType,
+      displayPrice: r.displayPrice,
+      billingInterval: r.billingInterval,
     };
   });
 }
@@ -190,7 +221,8 @@ export async function getActiveProductByCode(env: Env, code: string): Promise<Pr
   const db = getDb(env);
   const row = await db
     .prepare(
-      `SELECT PRODUCT_ID, PRODUCT_CODE, PRODUCT_NAME, STATUS, SORT_NO, DEL_FLG
+      `SELECT PRODUCT_ID, PRODUCT_CODE, PRODUCT_NAME, STATUS, SORT_NO, DEL_FLG,
+              PURCHASE_ENABLED, SALE_TYPE, DISPLAY_PRICE, BILLING_INTERVAL, STRIPE_PRICE_ID
        FROM M_PRODUCT WHERE PRODUCT_CODE = ? AND STATUS = 1 AND DEL_FLG = 0`,
     )
     .bind(code)
@@ -280,8 +312,16 @@ export async function recordEntitlementAccess(
   env: Env,
   authUserId: string,
   productId: number,
+  sessionId?: string | null,
 ): Promise<void> {
-  await recordAccessWithSuppression(request, env, authUserId, productId, ACCESS_TYPE.ENTITLEMENT_CHECK);
+  await recordAccessWithSuppression(
+    request,
+    env,
+    authUserId,
+    productId,
+    ACCESS_TYPE.ENTITLEMENT_CHECK,
+    sessionId ?? null,
+  );
 }
 
 /**
@@ -302,13 +342,50 @@ export async function recordAppStartAccess(
   env: Env,
   authUserId: string,
   productId: number,
+  sessionId?: string | null,
 ): Promise<void> {
-  await recordAccessWithSuppression(request, env, authUserId, productId, ACCESS_TYPE.APP_START);
+  await recordAccessWithSuppression(
+    request,
+    env,
+    authUserId,
+    productId,
+    ACCESS_TYPE.APP_START,
+    sessionId ?? null,
+  );
+}
+
+/**
+ * 定期観測アクセスログ（ACCESS_TYPE=2 / PERIODIC_CHECK）を抑制付きで記録する。
+ *
+ * ログイン状態を維持したままの長時間利用中でも、利用地点・セッションを再観測するための
+ * heartbeat 用。抑制条件・間隔は他 ACCESS_TYPE と同じ既存機構（ACCESS_LOG_INTERVAL_MIN）を
+ * 再利用する（新しい LAST_SEEN 型集約は導入しない・append 型の低頻度観測）。
+ * ACCESS_TYPE が独立しているため既存の起動/権限確認ログの意味・挙動に影響しない。
+ *
+ * @throws AccessLogSettingError 設定値が不正なとき
+ */
+export async function recordPeriodicAccess(
+  request: Request,
+  env: Env,
+  authUserId: string,
+  productId: number,
+  sessionId?: string | null,
+): Promise<void> {
+  await recordAccessWithSuppression(
+    request,
+    env,
+    authUserId,
+    productId,
+    ACCESS_TYPE.PERIODIC_CHECK,
+    sessionId ?? null,
+  );
 }
 
 /**
  * 指定 ACCESS_TYPE のアクセスログを、同一条件 ACCESS_LOG_INTERVAL_MIN 抑制付きで記録する内部共通処理。
  * 抑制キー: AUTH_USER_ID / PRODUCT_ID / ACCESS_TYPE / DEVICE_ID（DEVICE_ID は NULL 同士も一致）。
+ * sessionId は SESSION_ID_HASH の記録にのみ用い、抑制キーには含めない
+ * （同一セッションでも DEVICE_ID・間隔ベースの既存抑制挙動を変えない）。
  */
 async function recordAccessWithSuppression(
   request: Request,
@@ -316,6 +393,7 @@ async function recordAccessWithSuppression(
   authUserId: string,
   productId: number,
   accessType: AccessType,
+  sessionId: string | null = null,
 ): Promise<void> {
   const raw = await getSystemSetting(env, "ACCESS_LOG_INTERVAL_MIN");
   // 設定値検証: 不在 / 非整数 / 負数は内部設定エラー（fallback しない）
@@ -358,10 +436,15 @@ async function recordAccessWithSuppression(
     }
   }
 
+  // session_id はサーバー鍵で HMAC 化して保存（生 session_id は保存しない）。
+  // session_id 欠損・鍵未設定なら null（SESSION_ID_HASH は NULL）。
+  const sessionIdHash = await computeSessionIdHash(sessionId, env.SESSION_ID_HASH_SECRET);
+
   await writeAccessLog(request, env, {
     authUserId,
     productId,
     accessType,
+    sessionIdHash,
   });
 }
 

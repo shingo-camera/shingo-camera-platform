@@ -21,15 +21,24 @@ writeFileSync(
   entry,
   `export { parseProductCodes, parseStatusProductCodes, computeAllGranted, resolveBaseUrl, settleAttemptViaStripe } from "../../src/routes/purchases";
 export {
+  precheckMultiCheckout, isProductAvailable, checkProductDependencies, assertNoDependencyCycle, DependencyConfigError, getAllProductDependencyGroups, SALE_TYPE_ONE_TIME, SALE_TYPE_SUBSCRIPTION,
+} from "../../src/shared/purchase";
+export { DependencyRequiredError } from "../../src/shared/errors";
+export {
   validateOperationId, buildCartKey, buildIdempotencyKey,
   createAttemptWithLocks, attemptHoldsAllLocks, findActiveAttemptHoldingAnyProduct, findActiveAttemptsHoldingAnyProduct, getActiveAttemptsForUser,
-  getAttemptByOperationId, getAttemptItems,
+  getAttemptByOperationId, getAttemptItems, buildPriceIdToCodeMapFromAttempt,
   updateAttemptStatus, releaseLocksForAttempt, cancelAttempt, expireAttempt, markAttemptPaid,
   markCreateAttempted, markAttemptPaidWithSession, isCreateResultIndeterminate, isLockConflictError,
   rebuildCreateParams, detectDuplicatePaidProductIds, recordPaymentEvent, buildPreparedItems,
   ATTEMPT_STATUS, PAYMENT_EVENT_TYPE,
 } from "../../src/shared/checkout_attempt";
 export { classifyCreateError } from "../../src/shared/stripe";
+export { computeSessionIdHash } from "../../src/shared/session_hash";
+export {
+  recordAppStartAccess, recordEntitlementAccess, recordPeriodicAccess, AccessLogSettingError,
+} from "../../src/shared/entitlement";
+export { ACCESS_TYPE, writeAccessLog } from "../../src/shared/logs";
 export { verifyLineItemsAndResolve, epochToJstIso, reconcileAttemptForSession } from "../../src/shared/stripe_fulfill";
 export { isResetAllowedEnv, classifyActiveAttemptForReset, deletePurchaseStateForUser } from "../../src/routes/admin_test";
 `,
@@ -57,3 +66,20 @@ await esbuild.build({
 });
 
 console.log("[test] built test/_bundle/purchase_logic.mjs");
+
+// SUPPORT 問い合わせの検証純関数（依存なし）をバンドル
+const supportEntry = resolve(outDir, "_support_entry.ts");
+writeFileSync(
+  supportEntry,
+  `export { validateSupportInput, buildAdminMailText, buildAdminMailSubject, buildAckMailText, buildAckMailSubject, SUPPORT_CATEGORIES, SUPPORT_LIMITS } from "../../src/shared/support_validate";\n`,
+);
+await esbuild.build({
+  entryPoints: [supportEntry],
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  outfile: resolve(outDir, "support_validate.mjs"),
+  logLevel: "silent",
+});
+
+console.log("[test] built test/_bundle/support_validate.mjs");

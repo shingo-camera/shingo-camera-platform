@@ -26,6 +26,12 @@ export interface ErrorBody {
     message: string;
     /** 入力エラー時のフィールド別メッセージ（任意。API.md 4「入力エラー」） */
     fields?: Record<string, string>;
+    /**
+     * 構造化された追加情報（任意）。フロントが表示を組み立てるための機械可読データ。
+     * 内部詳細（DB/外部サービスの生情報・秘密）は載せない。商品コード等の公開情報のみ。
+     * 例: DEPENDENCY_REQUIRED で「購入対象コード＋不足前提グループ」を返す。
+     */
+    details?: unknown;
   };
 }
 
@@ -51,16 +57,21 @@ export function jsonOk<T>(data: T, status = 200): Response {
  * @param message 利用者向けメッセージ
  * @param status HTTPステータス（既定400）
  * @param fields 入力エラー時のフィールド別メッセージ（任意）
+ * @param details 構造化された追加情報（任意・公開情報のみ）
  */
 export function jsonError(
   code: string,
   message: string,
   status = 400,
   fields?: Record<string, string>,
+  details?: unknown,
 ): Response {
   const error: ErrorBody["error"] = { code, message };
   if (fields) {
     error.fields = fields;
+  }
+  if (details !== undefined) {
+    error.details = details;
   }
   const body: ErrorBody = { result: "NG", error };
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });

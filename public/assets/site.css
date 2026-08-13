@@ -757,6 +757,19 @@ html.hero-intro .h-text { opacity: 0; transform: translateY(12px); animation: hT
 .buy-block { padding: 52px 0 40px; border-top: 1px solid var(--line-soft); }
 .price { font-size: 26px; font-weight: 600; color: #fff; margin: 0 0 20px; }
 .price .muted-note { font-size: 13px; font-weight: 400; color: var(--text-3); margin-left: 6px; }
+.buy-terms { margin: 18px 0 0; font-size: 12.5px; line-height: 1.85; color: var(--text-3); max-width: 640px; }
+.buy-terms a { color: var(--text-2); text-decoration: underline; }
+.buy-terms a:hover { color: var(--text); }
+
+/* 購入前確認モーダル（STORE → Stripe 遷移前。client-side のみ） */
+.pconf-overlay { position: fixed; inset: 0; z-index: 2000; background: rgba(6, 8, 12, 0.72); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.pconf { width: 100%; max-width: 460px; max-height: 90vh; overflow-y: auto; background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5); }
+.pconf-title { font-size: 18px; color: #fff; font-weight: 600; margin: 0 0 16px; }
+.pconf-items { border: 1px solid var(--line-soft); border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; }
+.pconf-row { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--text-2); padding: 4px 0; }
+.pconf-total { border-top: 1px solid var(--line-soft); margin-top: 6px; padding-top: 10px; color: #fff; font-weight: 600; }
+.pconf-note { margin: 0 0 20px; font-size: 12.5px; line-height: 1.8; color: var(--text-3); }
+.pconf-actions { display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap; }
 
 /* note 誘導 */
 .note-cta { margin: 20px 0; }
@@ -802,7 +815,14 @@ html.hero-intro .h-text { opacity: 0; transform: translateY(12px); animation: hT
 .doc h1 { font-size: 28px; margin: 0 0 10px; color: #fff; font-weight: 600; letter-spacing: 0.01em; }
 .doc .lead { color: var(--text-3); margin: 0 0 32px; font-size: 14px; }
 .doc h2 { font-size: 17px; margin: 30px 0 10px; color: var(--text); font-weight: 600; }
-.doc p { margin: 0 0 12px; color: var(--text-2); }
+.doc h3 { font-size: 15px; margin: 22px 0 8px; color: var(--text); font-weight: 600; }
+.doc p { margin: 0 0 12px; color: var(--text-2); line-height: 1.9; }
+.doc ul, .doc ol { margin: 0 0 12px; padding-left: 22px; color: var(--text-2); }
+.doc li { margin: 0 0 6px; line-height: 1.85; }
+.doc strong { color: var(--text); font-weight: 600; }
+.doc .updated { color: var(--text-3); font-size: 13px; margin: 0 0 24px; }
+.doc hr { border: 0; border-top: 1px solid var(--line-soft); margin: 32px 0; }
+.doc .note { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-1); padding: 14px 16px; color: var(--text-3); font-size: 13px; line-height: 1.8; margin: 0 0 20px; }
 
 /* プレースホルダ（未確定本文・画像） */
 .placeholder {
@@ -815,6 +835,40 @@ html.hero-intro .h-text { opacity: 0; transform: translateY(12px); animation: hT
   line-height: 1.9;
 }
 .placeholder.tall { min-height: 200px; display: flex; align-items: center; justify-content: center; text-align: center; }
+
+/* SUPPORT 問い合わせフォーム */
+.support-form { margin: 8px 0 0; max-width: 560px; }
+.support-form .field { margin: 0 0 16px; }
+.support-form label { display: block; font-size: 13px; color: var(--text-2); margin: 0 0 6px; }
+.support-form .req { color: var(--accent); font-size: 11px; margin-left: 6px; }
+.support-form .opt { color: var(--text-3); font-size: 11px; margin-left: 6px; }
+.support-form input[type="email"],
+.support-form input[type="text"],
+.support-form select,
+.support-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+.support-form input:focus,
+.support-form select:focus,
+.support-form textarea:focus { border-color: var(--accent); }
+.support-form textarea { resize: vertical; line-height: 1.7; }
+.support-form .form-actions { margin: 20px 0 0; }
+.support-form .hp-field { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.support-gate { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-1); padding: 20px; margin: 8px 0 0; }
+.support-gate p { margin: 0 0 14px; color: var(--text-2); }
+.gate-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.sf-status { margin: 14px 0 0; font-size: 13px; line-height: 1.7; min-height: 1.2em; }
+.sf-status.ok { color: #4caf88; }
+.sf-status.err { color: #e06767; }
 
 /* ============ Footer（細く静かに） ============ */
 .site-footer {
@@ -881,6 +935,9 @@ html.js-reveal .reveal.in { opacity: 1; transform: none; transition: opacity 0.7
 .store-check { font-size: 14px; white-space: nowrap; color: var(--text-2); }
 .store-check input { margin-right: 4px; }
 .store-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding-top: 12px; border-top: 2px solid var(--line); flex-wrap: wrap; }
+.store-agree { flex-basis: 100%; margin: 4px 0 0; font-size: 12px; line-height: 1.7; color: var(--text-3); text-align: right; }
+.store-agree a { color: var(--text-2); text-decoration: underline; }
+.store-agree a:hover { color: var(--text); }
 .store-summary .ss-total { font-size: 16px; color: var(--text-2); }
 .store-summary #store-total { font-weight: bold; font-size: 18px; color: var(--text); }
 .store-pending { margin: 12px 0; padding: 12px 16px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; text-align: left; color: var(--text-2); }
@@ -893,6 +950,9 @@ html.js-reveal .reveal.in { opacity: 1; transform: none; transition: opacity 0.7
 .store-login-note { margin: 0 0 12px; }
 .store-row.is-owned { opacity: 0.92; }
 .badge.badge-owned { border-color: var(--ok, #4fd18b); color: var(--ok, #4fd18b); background: transparent; font-weight: 600; }
+.badge.badge-soon { border-color: var(--line); color: var(--text-3); background: transparent; font-weight: 600; }
+.store-card.is-soon { opacity: 0.72; }
+.store-card.is-soon .sr-price { color: var(--text-3); }
 .sr-cta { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .btn.btn-sm { padding: 5px 12px; font-size: 13px; }
 .sr-use { white-space: nowrap; }
