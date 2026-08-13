@@ -16,9 +16,9 @@ name = "shingo-camera-platform"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 
-# 標準ドメイン(*.workers.dev)で到達可能にする。
-# カスタムドメイン未紐付けのため、URL を知る者のみアクセスできる非公開状態。
-workers_dev = true
+# Production はカスタムドメイン https://shingo-camera.com を正規入口とする。
+# *.workers.dev は公開経路を一本化するため無効化する。
+workers_dev = false
 
 # Dashboard で管理している Production の通常環境変数（SUPABASE_URL /
 # SUPABASE_ANON_KEY 等）を、wrangler deploy 時に削除・上書きしない。
