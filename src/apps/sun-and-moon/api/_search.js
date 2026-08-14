@@ -85,62 +85,85 @@ export function solveDstar(targetAlt, se, te, th, DrefKm){
   return best;
 }
 
-// 現在距離 DrefM(m)・移動許容 budgetM(m) のとき、band [Dref-budget, Dref+budget] 内で
-// 上端中央一致地点 P* の根を全探索し、原点(oLat,oLng)からの移動距離が最小の根を選ぶ。
-function bestPstar(oLat, oLng, t, sElev, bodyAz, bodyAlt, DrefM, budgetM){
-  const DrefKm = DrefM / 1000;
-  const loKm = Math.max(EPS_KM, DrefKm - budgetM / 1000);
-  const hiKm = DrefKm + budgetM / 1000;
+// 角度差（-180,180]。
+function _adiff(a, b){ return ((a - b + 540) % 360) - 180; }
+
+// D* 探索レンジ（min-move 根・wide）。moveM は最終フィルタであり、探索/評価ゲートには使わない（P0-1）。
+// 交差近傍の D*≈Dref を確実に含む幅（±(2km か 距離の半分)）で全根を得る。
+function _dstarRange(DrefM){
+  const DKm = DrefM / 1000;
+  const halfKm = Math.max(2, DKm * 0.5);
+  return { loKm: Math.max(EPS_KM, DKm - halfKm), hiKm: DKm + halfKm };
+}
+
+// 正しい P* 配置（P0-4）：対象から距離 Dstar・「P*→対象方位 = bodyAz」を満たす点を、
+// 配置方位 β（対象→P* 方位）の secant で解く。球面 forward/reverse 方位差を az 誤差にしない。
+function placePstarForRoot(t, bodyAz, Dstar){
+  let beta = (bodyAz + 180) % 360;          // 初期：対象→P* 方位
+  let P = dest(t.lat, t.lng, beta, Dstar);
+  for(let it = 0; it < 8; it++){
+    const back = brng(P.lat, P.lng, t.lat, t.lng); // P*→対象 方位（同一 P* での対象中心方位）
+    const e = _adiff(bodyAz, back);
+    if(Math.abs(e) < 1e-8) break;
+    beta = (beta + e + 360) % 360;           // d(back)/d(beta) ≈ 1
+    P = dest(t.lat, t.lng, beta, Dstar);
+  }
+  return P;
+}
+
+// 検出専用の軽量 moveM（局所最小の「位置」検出のみに使用）。方位 secant 補正を省き、
+// P0≈dest(target, bodyAz+180, Dstar) で近似する（真値との差は高々十数m・最終 refine/emit は厳密版）。
+function coarseMoveGeo(sLat, sLng, sElev, t, bodyAz, bodyAlt, DrefM){
+  const Dref = (DrefM != null) ? DrefM : hav(sLat, sLng, t.lat, t.lng) * 1000;
+  const { loKm, hiKm } = _dstarRange(Dref);
   const roots = solveDstarRoots(bodyAlt, sElev, t.elev, t.h, loKm, hiKm);
-  if(!roots.length) return null;
-  let best = null;
+  if(!roots.length) return Infinity;
+  let m = Infinity;
   for(const Dstar of roots){
     const P = dest(t.lat, t.lng, (bodyAz + 180) % 360, Dstar);
-    const m = hav(oLat, oLng, P.lat, P.lng) * 1000;
-    if(!best || m < best.m) best = { lat: P.lat, lng: P.lng, Dstar, m };
+    const mm = hav(sLat, sLng, P.lat, P.lng) * 1000;
+    if(mm < m) m = mm;
   }
-  return best;
+  return m;
 }
 
 // 純幾何版：bodyAz/bodyAlt 固定で、現在地点(sLat,sLng,sElev)から P* までの必要移動距離 m。
-// 複数根は最小移動を採用。上端中央一致の検算値(az/altErr)も返す（決定論・ephemeris不使用）。
+// D* は wide-range で全根探索（0/1/複数根対応・P0-5）、複数根は最小移動を採用。
+// P* 配置は「P*→対象方位 = bodyAz」を満たすよう補正するため、az/alt 誤差は原理的に 0 付近（P0-4）。
 export function idealMoveGeo(sLat, sLng, sElev, t, bodyAz, bodyAlt, DrefM, budgetM){
   const Dref = (DrefM != null) ? DrefM : hav(sLat, sLng, t.lat, t.lng) * 1000;
-  const budget = (budgetM != null) ? budgetM : 200;
-  const b = bestPstar(sLat, sLng, t, sElev, bodyAz, bodyAlt, Dref, budget);
-  if(!b) return { m: Infinity, ok: false };
-  const tAz2 = brng(b.lat, b.lng, t.lat, t.lng);
-  const dKm2 = hav(b.lat, b.lng, t.lat, t.lng);
+  const { loKm, hiKm } = _dstarRange(Dref);
+  const roots = solveDstarRoots(bodyAlt, sElev, t.elev, t.h, loKm, hiKm);
+  if(!roots.length) return { m: Infinity, ok: false };
+  let best = null;
+  for(const Dstar of roots){
+    const P = placePstarForRoot(t, bodyAz, Dstar);
+    const m = hav(sLat, sLng, P.lat, P.lng) * 1000;
+    if(!best || m < best.m) best = { P, Dstar, m };
+  }
+  const tAz2 = brng(best.P.lat, best.P.lng, t.lat, t.lng);
+  const dKm2 = hav(best.P.lat, best.P.lng, t.lat, t.lng);
   const topAlt2 = elAng(dKm2, sElev, t.elev, t.h);
-  const azErr = Math.abs(((bodyAz - tAz2 + 540) % 360) - 180);
+  const azErr = Math.abs(_adiff(bodyAz, tAz2));
   const altErr = Math.abs(bodyAlt - topAlt2);
-  return { m: b.m, azErr, altErr, Dstar: b.Dstar, ok: azErr < 0.02 && altErr < 0.02 };
+  return { m: best.m, azErr, altErr, Dstar: best.Dstar, ok: azErr < 0.02 && altErr < 0.02, P: best.P };
 }
 
-// 本番用：ある時刻 dt の天体を既存計算で評価し、理想地点 P* を置き、
-// P* で天体 az/alt・対象方位・上端仰角を再評価して一致を確認（仕様 §5-6）。
-// 撮影地点移動による天体 az/alt 変化を反映するため少数回反復。反復回数 iters と収束 converged を返す。
+// 本番用：ある時刻 dt の天体を既存計算で評価して P* を置き、
+// 「同一 P* 地点で再評価した天体中心方位」vs「同一 P* から見た対象中心方位」で収束判定（P0-4）。
+// Moon 視差（撮影地点移動による天体 az/alt 変化）は P* 再評価で反映。moveM は現在地点→P* の実距離。
 export function idealMove(sLat, sLng, sElev, t, dt, isSun, budgetM){
-  const budget = (budgetM != null) ? budgetM : 200;
-  let pLat = sLat, pLng = sLng; const pElev = sElev;
-  let converged = false, azErr = Infinity, altErr = Infinity, iters = 0, m = Infinity;
-  for(let it = 0; it < 4; it++){
-    iters = it + 1;
-    const bp = isSun ? sunPos(dt, pLat, pLng) : moonPos(dt, pLat, pLng);          // A: 現P での天体
-    const DrefM = hav(pLat, pLng, t.lat, t.lng) * 1000;
-    const b = bestPstar(sLat, sLng, t, pElev, bp.az, bp.alt, DrefM, budget);      // B+C: 最小移動根で P*
-    if(!b) return { m: Infinity, converged: false, iters, azErr, altErr };
-    pLat = b.lat; pLng = b.lng;
-    const bp2 = isSun ? sunPos(dt, pLat, pLng) : moonPos(dt, pLat, pLng);         // D: 移動後の天体を再評価
-    const tAz2 = brng(pLat, pLng, t.lat, t.lng);
-    const dKm2 = hav(pLat, pLng, t.lat, t.lng);
-    const topAlt2 = elAng(dKm2, pElev, t.elev, t.h);
-    azErr  = Math.abs(((bp2.az - tAz2 + 540) % 360) - 180);
-    altErr = Math.abs(bp2.alt - topAlt2);
-    m = hav(sLat, sLng, pLat, pLng) * 1000;
-    if(azErr < 0.02 && altErr < 0.02){ converged = true; break; }                // E: 収束
-  }
-  return { m, converged, iters, azErr, altErr };
+  const bp = isSun ? sunPos(dt, sLat, sLng) : moonPos(dt, sLat, sLng);   // 現在地点での天体
+  const g = idealMoveGeo(sLat, sLng, sElev, t, bp.az, bp.alt);           // 純幾何で P*
+  if(!g || !isFinite(g.m)) return { m: Infinity, converged: false, iters: 1, azErr: Infinity, altErr: Infinity };
+  // 同一 P* で天体を再評価（視差反映）し、同一地点の 2 方位・2 仰角で検算する。
+  const bp2 = isSun ? sunPos(dt, g.P.lat, g.P.lng) : moonPos(dt, g.P.lat, g.P.lng);
+  const tAz2 = brng(g.P.lat, g.P.lng, t.lat, t.lng);
+  const dKm2 = hav(g.P.lat, g.P.lng, t.lat, t.lng);
+  const topAlt2 = elAng(dKm2, sElev, t.elev, t.h);
+  const azErr  = Math.abs(_adiff(bp2.az, tAz2));   // 同一 P*：天体中心方位 vs 対象中心方位
+  const altErr = Math.abs(bp2.alt - topAlt2);      // 同一 P*：天体中心仰角 vs 上端仰角
+  return { m: g.m, converged: azErr < 0.02 && altErr < 0.02, iters: 1, azErr, altErr, P: g.P };
 }
 
 // 上端中央一致に必要な撮影地点移動距離が m 以内になり得る候補の、保守的（superset）プレフィルタ境界。
@@ -173,10 +196,16 @@ export function acceptMove(fd, maxMoveM){
     && fd.moveM <= maxMoveM;
 }
 
+// 時刻探索と最終 moveM 採否を分離（P0-1/2/3）：
+//  ・粗1分走査で「月/太陽が対象上端付近を通過する時間区間」を bracket（alt交差 g=bodyAlt-topAlt の
+//    符号変化＋グレーズ=|g|局所最小。az は superset ゲート asin(200/D)+余裕、太陽は出没±30分窓）。
+//    ここでは「その1分に200m以内で完全一致」を要求しない（区間検出のみ）。
+//  ・各 bracket 内で moveM(t) を golden-section 最小化して代表時刻を求める（分間イベントも解ける）。
+//  ・代表時刻の moveM を採否正本にし、chance≤200 / pinpoint≤30 でフィルタ（採否は buildResult 側）。
+const AZ_SCAN_CUSHION_DEG = 1.0;
+
 // input: { sLat, sLng, sElev, t, dateStr, dayOffset, dayCount, bodyModes, step }
-// strategy: { azThr(distM)->deg, buildResult(found, ds, isSun, ctx)->obj|null }
-//   buildResult が null を返した候補は不採用（pinpoint の移動量フィルタ等）。
-// 戻り値: { results, tAz, topAlt, baseAlt, AZ_THR, targetAngDiam }
+// strategy: { buildResult(found, ds, isSun, ctx)->obj|null }
 export function searchCore(input, strategy){
   const { sLat, sLng, sElev, t, dateStr, dayOffset, dayCount, bodyModes, step } = input;
 
@@ -188,36 +217,56 @@ export function searchCore(input, strategy){
   const targetAngDiam = Math.atan2(t.h, distM) * 180 / Math.PI;
 
   const DAYS = 365;
-  const STEP  = step;
+  const STEP  = step || 60000;
   const STEPS = Math.floor(1440 * 60000 / STEP);
   const today = new Date(dateStr + 'T00:00:00+09:00');
   const dOff = (typeof dayOffset === 'number' && dayOffset >= 0) ? dayOffset : 0;
   const dCnt = (typeof dayCount === 'number' && dayCount > 0) ? dayCount : DAYS;
   const dEnd = Math.min(dOff + dCnt, DAYS);
 
-  // プレフィルタは「moveM≤budget の候補を絶対に落とさない」保守的(superset)境界のみ使用（P0-2）。
-  // budget は chance の最大値 200m（pinpoint≤30 は部分集合なので同一候補集合でよい）。
-  const PREFILTER_BUDGET = 200;
-  const { azThr: AZ_THR, altLo: ALT_LO, altHi: ALT_HI } =
-    prefilterBounds(distM, sElev, t.elev, t.h, PREFILTER_BUDGET);
+  // 方位スキャンゲート（superset）：moveM≤200 の候補は必ず azDiff ≤ asin(200/D)（∵ 横移動≤moveM）。
+  // 区間検出の取りこぼし防止に +余裕。budget≥D なら全方位。
+  const azGate = (200 >= distM) ? 180 : (Math.asin(200 / distM) * 180 / Math.PI + AZ_SCAN_CUSHION_DEG);
   const ctx = { tAz, distH, distM, topAlt, baseAlt, targetAngDiam, sLat, sLng, sElev, t };
   const results = [];
 
-  // 代表時刻 found（区間内 moveM 最小）について本番の idealMove（天体再評価）を実行し、
-  // m・収束・反復回数を添付して buildResult（採否＝moveConverged かつ moveM≤threshold）へ渡す。
-  const emit = (found, ds, isSun) => {
-    const mv = idealMove(sLat, sLng, sElev, t, found.dt, isSun, PREFILTER_BUDGET);
-    found.moveM = mv.m;
-    found.moveConverged = mv.converged;
-    found.moveIters = mv.iters;
+  // 最小時刻の特定には軽量 moveM（coarseMoveGeo）を使う（secant省略・真値との差は十数m・時刻位置は不変）。
+  // 最終 emit は厳密 idealMove で moveM/収束/azErr/altErr を確定する（最終精度は不変）。
+  const cheapMoveAt = (ms, isSun) => {
+    const bp = isSun ? sunPos(new Date(ms), sLat, sLng) : moonPos(new Date(ms), sLat, sLng);
+    return coarseMoveGeo(sLat, sLng, sElev, t, bp.az, bp.alt, distM);
+  };
+
+  // golden-section で区間 [aMs,bMs] の moveM 最小時刻を返す。
+  const refineMin = (aMs, bMs, isSun) => {
+    const gr = (Math.sqrt(5) - 1) / 2;
+    let a = aMs, b = bMs;
+    let c = b - gr * (b - a), d = a + gr * (b - a);
+    let fc = cheapMoveAt(c, isSun), fd = cheapMoveAt(d, isSun);
+    for(let it = 0; it < 34; it++){
+      if(fc < fd){ b = d; d = c; fd = fc; c = b - gr * (b - a); fc = cheapMoveAt(c, isSun); }
+      else       { a = c; c = d; fc = fd; d = a + gr * (b - a); fd = cheapMoveAt(d, isSun); }
+    }
+    return (a + b) / 2;
+  };
+
+  const emitAt = (ms, isSun, ds) => {
+    const dt = new Date(ms);
+    const mv = idealMove(sLat, sLng, sElev, t, dt, isSun, 200);
+    const bp = isSun ? sunPos(dt, sLat, sLng) : moonPos(dt, sLat, sLng);
+    const found = {
+      dt, az: bp.az, alt: bp.alt, azDiff: Math.abs(_adiff(bp.az, tAz)),
+      angDiam: bp.angDiam || 0.53,
+      moveM: mv.m, moveConverged: mv.converged, moveIters: mv.iters, azErr: mv.azErr, altErr: mv.altErr,
+    };
     const r = strategy.buildResult(found, ds, isSun, ctx);
     if(r) results.push(r);
   };
 
   for(const isSun of bodyModes){
     for(let d = dOff; d < dEnd; d++){
-      const base = new Date(today.getTime() + d * 86400000);
-      const ds = base.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+      const baseDate = new Date(today.getTime() + d * 86400000);
+      const ds = baseDate.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
       const dayStart = new Date(ds + 'T00:00:00+09:00');
 
       if(!isSun){
@@ -235,34 +284,70 @@ export function searchCore(input, strategy){
         }
       }
 
-      let found = null;
+      // 粗1分走査で bracket を収集。検出は「真の moveM(t) の局所最小」を主軸にする
+      //  （近距離では moveM≤200 が大角度離れた点でも成立するため、角距離や alt 差では取りこぼす）。
+      //  併せて (a) alt交差 g の符号変化（遠距離 sub-minute 交差の保険）、
+      //  (b) active ラン（az ゲート内の連続区間）の両端（窓境界にある最小の保険）も bracket 化する。
+      //  active は az superset ゲート内・（太陽は）出没±30分窓内。moveM は探索ゲートに使わない（P0-1）。
+      const brackets = [];
+      let m2 = null, m1 = null;     // 直近2 active（moveM局所最小検出）: {ms, m}
+      let gPrev = null;             // 直近 active（alt交差検出）: {ms, g}
+      let lastActiveMs = null, prevActive = false;
       for(let i = 0; i <= STEPS; i++){
-        const dt = new Date(dayStart.getTime() + i * STEP);
+        const ms = dayStart.getTime() + i * STEP;
+        const dt = new Date(ms);
         const bp = isSun ? sunPos(dt, sLat, sLng) : moonPos(dt, sLat, sLng);
-        const azD = Math.abs(((bp.az - tAz + 180) % 360) - 180);
-        const inAlt = bp.alt >= ALT_LO && bp.alt <= ALT_HI; // moveM≤budget の superset 境界
-        let inTimeWindow = true;
+        const azD = Math.abs(_adiff(bp.az, tAz));
+        let inWin = true;
         if(isSun){
-          const tMs = dt.getTime();
-          const afterRise = sunRiseMs && tMs >= sunRiseMs && tMs <= sunRiseMs + 30 * 60000;
-          const beforeSet = sunSetMs && tMs >= sunSetMs - 30 * 60000 && tMs <= sunSetMs;
-          inTimeWindow = !!(afterRise || beforeSet);
+          const afterRise = sunRiseMs && ms >= sunRiseMs && ms <= sunRiseMs + 30 * 60000;
+          const beforeSet = sunSetMs && ms >= sunSetMs - 30 * 60000 && ms <= sunSetMs;
+          inWin = !!(afterRise || beforeSet);
         }
-        if(azD <= AZ_THR && inAlt && inTimeWindow){
-          // 代表時刻は「区間内で必要移動距離 moveM が最小」の時刻（純幾何版で高速評価）。
-          // 旧高度差最小は最終rankingに使わない（P0-1）。
-          const mg = idealMoveGeo(sLat, sLng, sElev, t, bp.az, bp.alt, distM, PREFILTER_BUDGET);
-          if(!found || mg.m < found.mgeo){
-            found = { dt, az: bp.az, alt: bp.alt, azDiff: azD, angDiam: bp.angDiam || 0.53, mgeo: mg.m };
-          }
+        const active = (azD <= azGate) && inWin;
+        if(active){
+          const g = bp.alt - topAlt;
+          const cm = coarseMoveGeo(sLat, sLng, sElev, t, bp.az, bp.alt, distM);   // 検出専用 軽量moveM
+          const cur = { ms, m: isFinite(cm) ? cm : Infinity };
+          if(!prevActive) brackets.push([ms - STEP, ms + STEP]);                       // (b) ラン開始端
+          if(gPrev && ((gPrev.g <= 0) !== (g <= 0))) brackets.push([gPrev.ms, ms]);    // (a) alt交差
+          if(m1 && m2 && m1.m <= m2.m && m1.m <= cur.m && isFinite(m1.m))              // moveM局所最小
+            brackets.push([m2.ms, ms]);
+          m2 = m1; m1 = cur; gPrev = { ms, g }; lastActiveMs = ms;
         } else {
-          if(found){ emit(found, ds, isSun); found = null; }
+          if(prevActive && lastActiveMs != null) brackets.push([lastActiveMs - STEP, lastActiveMs + STEP]); // (b) ラン終了端
+          m2 = null; m1 = null; gPrev = null;
         }
+        prevActive = active;
       }
-      if(found){ emit(found, ds, isSun); }
+      if(prevActive && lastActiveMs != null) brackets.push([lastActiveMs - STEP, lastActiveMs + STEP]);     // 末尾がactiveのまま終了
+      if(!brackets.length) continue;
+
+      // 各 bracket を時刻 refine → 近接（2分以内）を最小 moveM で統合 → emit。
+      const reps = [];
+      for(const [aMs, bMs] of brackets){
+        const ts = refineMin(aMs - STEP, bMs + STEP, isSun);
+        reps.push({ ms: ts, m: cheapMoveAt(ts, isSun) });
+      }
+      reps.sort((x, y) => x.ms - y.ms);
+      const uniq = [];
+      for(const r of reps){
+        if(uniq.length && Math.abs(r.ms - uniq[uniq.length - 1].ms) < 2 * 60000){
+          if(r.m < uniq[uniq.length - 1].m) uniq[uniq.length - 1] = r;
+        } else uniq.push(r);
+      }
+      // P1: 代表時刻の JST 日付が当日 ds と一致する候補だけを emit する。
+      // bracket 検出は翌日 00:00 サンプルまで含み、refine も区間を跨ぐため、代表時刻が前日/翌日へ
+      // はみ出すことがある。イベントは「真の最小時刻が属する日」に一意帰属させ、隣日走査との重複・
+      // result.date と result.ts の JST 日付不一致を防ぐ（各イベントはその属する日の走査でのみ emit）。
+      for(const u of uniq){
+        const jstDate = new Date(u.ms).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+        if(jstDate !== ds) continue;
+        emitAt(u.ms, isSun, ds);
+      }
     }
   }
 
   results.sort((a, b) => a.ts - b.ts);
-  return { results, tAz, topAlt, baseAlt, AZ_THR, targetAngDiam };
+  return { results, tAz, topAlt, baseAlt, AZ_THR: azGate, targetAngDiam };
 }
