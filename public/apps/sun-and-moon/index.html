@@ -591,9 +591,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
 #map-menu-btn{ display:none; } /* PCでは非表示（スマホのメディアクエリで表示） */
 #map-sat-btn{ display:none; } /* PCでは非表示（PCはLeaflet独自コントロールctrl-satを使用） */
 @media (max-width:600px){
+  /* スマホ右上・右端縦列（上：月/太陽切替、下：衛星切替）。両者36px高・8pxギャップで重ならない。 */
   #map-sat-btn{
     display:flex !important;
-    position:absolute; top:8px; right:8px; z-index:1000;
+    position:absolute;
+    top:calc(52px + env(safe-area-inset-top));
+    right:calc(8px + env(safe-area-inset-right)); left:auto; z-index:1000;
     width:36px; height:36px;
     align-items:center; justify-content:center;
     background:var(--sur2); border:1px solid var(--bd); color:var(--tx);
@@ -601,13 +604,14 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
     box-shadow:0 2px 8px rgba(0,0,0,.5);
     -webkit-tap-highlight-color:transparent; user-select:none;
   }
-  /* 太陽/月切替は衛星ボタン(🛰)と同じ右端縦列に組み込む。
-     衛星の直下(top=8+36+8=52px)へ同幅・同スタイルで積み、既存コントロールと重ならない。
-     衛星/メニュー/対象追加/ズーム/検索のいずれとも非干渉。safe-area(ノッチ・横向き)考慮。 */
+  /* 月/太陽切替を最上段(top=8px)へ。衛星切替はその直下(top=8+36+8=52px)。
+     幅可変(width:auto)だが右端揃え・同top行なし＝衛星と縦に重ならない。
+     モバイルでは Leaflet 右上コントロール群(.leaflet-top.leaflet-right)は display:none のため非干渉。
+     地図メニュー(☰)は右下(bottom)・safe-area(ノッチ・横向き)考慮。 */
   #map-body-toggle{
     display:flex !important;
     position:absolute;
-    top:calc(52px + env(safe-area-inset-top));
+    top:calc(8px + env(safe-area-inset-top));
     right:calc(8px + env(safe-area-inset-right)); left:auto; z-index:1000;
     width:auto; min-width:36px; height:36px; padding:0 8px;
     align-items:center; justify-content:center; gap:4px;
@@ -2015,7 +2019,7 @@ let tripodH=150; // 三脚高さ(cm)デフォルト150cm
 let gMoonTilt=0; // グローバル月傾き（drawView→drawCompassに共有）
 let map, sMarker, tMarker, polyLine=[];
 // P3: 検索結果保持（key=pin.id）。今回はpinpointのみ使用、chanceは準備のみ。
-let _pinSearchResults = { pinpoint: new Map(), chance: new Map() };
+let _pinSearchResults = { pinpoint: new Map() }; // 一括チャンス廃止によりpinpointのみ
 let _pinSearchRunning = false;
 let _pinSearchProgress = null;
 let _layoutRAF=null;
@@ -2074,7 +2078,7 @@ function deletePin(idx){
   const removed=pins[idx];
   pins.splice(idx,1);
   savePins(pins);
-  if(removed && removed.id){ _pinSearchResults.pinpoint.delete(removed.id); _pinSearchResults.chance.delete(removed.id); } // 該当結果のみ除去
+  if(removed && removed.id){ _pinSearchResults.pinpoint.delete(removed.id); } // 該当結果のみ除去
 }
 
 // ━━ 天気キャッシュ ━━
@@ -2646,7 +2650,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 function initMap(){
   const t=_ct();
   map=L.map('map',{zoomControl:true,attributionControl:true})
-       .setView([34.65, 135.50], 13); // ポートレート版：大阪付近を初期表示
+       .setView([35.681236, 139.767125], 13); // 全国販売版：東京駅付近を初期表示（保存地点がない場合のみ）
 
   const osmLayer=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
     attribution:'© OpenStreetMap contributors',maxZoom:20,maxNativeZoom:19
@@ -8087,15 +8091,20 @@ function _emptySlots(){
 }
 
 function saveSpot(){
-  if(sLat===null){
-    showHint('先に地図をクリックして撮影地点を選択してください。');
-    return;
-  }
+  // 保存条件：撮影地点と対象（拠点）の両方が選択済みのときだけ保存する。
+  // どちらか一方でも未選択なら何もしない（showHint/alert/入力ダイアログを一切出さず単純return）。
+  if(sLat===null || !(currentLandmarkBuildingId || curSubjectId)) return;
   let idx=savedSpots.findIndex(s=>s===null);
   if(idx===-1) idx=savedSpots.length; // 空きスロットが無ければ末尾へ追加（件数無制限）
   const t=_ct();
   const s=curSubject();
-  const hasTarget = !!(currentLandmarkBuildingId || curSubjectId); // 登録対象/プリセット対象いずれか選択
+  // 撮影計画名：対象と撮影地点が揃った場合のみ入力させる。既定値は「対象名称_」（例：大阪城_）。
+  // キャンセル（null）時は保存しない。入力はtrimして planName に保存する。
+  const _defPlanName = ((t && t.name) ? t.name : '') + '_';
+  const _planInput = prompt('撮影計画の名称を入力してください。', _defPlanName);
+  if(_planInput===null) return; // キャンセルは保存しない
+  const planName = _planInput.trim();
+  const hasTarget = !!(currentLandmarkBuildingId || curSubjectId); // 上のガードで常に true
   const distH=hasTarget?hav(sLat,sLng,t.lat,t.lng):0;
   const tAz=hasTarget?brng(sLat,sLng,t.lat,t.lng):0;
   const va=hasTarget?elAng(distH,sElev,t.elev,t.h):0;
@@ -8121,6 +8130,7 @@ function saveSpot(){
     time:ts,
     az:tAz, va, dist:distH,
     sensorKey: SENSORS[gSensorKey] ? gSensorKey : undefined, // 保存時点のセンサー（有効キーのみ。旧spotとの互換=フィールド追加のみ）
+    planName,                                   // S: 撮影計画名（任意。一覧識別用。旧データは無しでも完全互換）
     savedAt:new Date().toISOString()
   };
   savedSpots[idx]=spot;
@@ -8209,7 +8219,10 @@ function _spotLabel(spot){
     dow=new Date(ds+'T12:00:00+09:00').toLocaleDateString('ja-JP',{weekday:'short'});
     dow=`(${dow})`;
   }
-  return`${icon} ${tname} ${ds}${dow} ${ts}`;
+  // 既存表示（月/太陽アイコン・対象名・日付(曜日)・時刻）はそのまま。最後に planName を追加。
+  // planName が無い既存データでは何も追加しない（通常一覧・共有選択リスト共通の唯一のラベル関数）。
+  const pn = (spot.planName && String(spot.planName).trim()) ? ' '+String(spot.planName).trim() : '';
+  return`${icon} ${tname} ${ds}${dow} ${ts}${pn}`;
 }
 
 // S-3: 撮影計画の対象名（targetName優先→targetKeyから現データ→subjectName→—）
@@ -9192,6 +9205,18 @@ async function searchPinpointBatch(targetPins, onPin){
   return all;
 }
 
+// ★評価の共通単一ソース。評価値＝「対象上端中央一致に必要な撮影地点移動距離 m」（サーバ算出 r.moveM）。
+// 🎯=5m以内 / ★★★=10m以内 / ★★☆=50m以内 / ★☆☆=100m以内 / ☆☆☆=200m以内（通常chance現行値を正本）。
+// chance/pinpoint/一括pinpoint で共通使用。pinpoint採用上限(30m)は★境界(50m)とは別概念（採否はサーバのfilter）。
+function starOf(m, bodyIcon){
+  if(!(m>=0)) return '―';
+  if(m<=5)   return `🎯${bodyIcon||'🌕'}🎯`;
+  if(m<=10)  return '★★★';
+  if(m<=50)  return '★★☆';
+  if(m<=100) return '★☆☆';
+  if(m<=200) return '☆☆☆';
+  return '―';
+}
 function renderPinChanceRows(pin, results, container, kind){
   // 既存の結果行をクリア
   container.querySelectorAll('.pin-chance-row').forEach(el=>el.remove());
@@ -9200,7 +9225,7 @@ function renderPinChanceRows(pin, results, container, kind){
     const noEl=document.createElement('div');
     noEl.className='pin-chance-row';
     noEl.style.cssText='font-size:9px;color:var(--sub);padding:2px 8px 4px;';
-    noEl.textContent = (kind==='chance') ? '条件を満たすチャンスなし' : '30m以内のチャンスなし';
+    noEl.textContent = '30m以内のチャンスなし';
     container.appendChild(noEl);
     return;
   }
@@ -9208,12 +9233,9 @@ function renderPinChanceRows(pin, results, container, kind){
   results.forEach(r=>{
     const dow=new Date(r.date+'T12:00:00+09:00').toLocaleDateString('ja-JP',{weekday:'short'});
     const dowColor=dow.includes('日')?'#ff6655':dow.includes('土')?'#4488ff':'var(--sub)';
-    const moveM=r.distM*Math.tan(r.azDiff*Math.PI/180);
+    const moveM=(typeof r.moveM==='number')?r.moveM:r.distM*Math.tan(r.azDiff*Math.PI/180);
     const bodyIcon=r.isSun?'☀️':'🌕';
-    let star;
-    if(moveM<=5)        star=`🎯${bodyIcon}🎯`;
-    else if(moveM<=10)  star='★★★';
-    else if(moveM<=30)  star='★★☆';
+    const star=starOf(moveM, bodyIcon);
     const range=r.topAlt-r.baseAlt;
     const altPct=range>0.001?Math.round((r.alt-r.baseAlt)/range*100):0;
     const bodyInfo=r.isSun
@@ -9344,115 +9366,6 @@ async function runPinBulkSearch(targetPins){
   }
 }
 
-// ━━ B-2: 登録地点チャンス一括検索（月＋太陽・各4区間直列） ━━
-function _chanceBatchLogErr(e){
-  if(e && e._http!=null) console.error('[chance batch] HTTP error', e._http, e._txt||'');
-  else if(e && e._json) console.error('[chance batch] JSON parse error', e);
-  else console.error('[chance batch] fetch error', e);
-}
-// 既存 /api/chance mode:'chance' を呼ぶだけ（天体計算・判定はサーバ側／クライアント再計算しない）
-async function searchChanceBatch(targetPins, onPin){
-  const startDate=document.getElementById('idate').value; // 検索開始日を固定（途中で画面が変わっても全Pin同一）
-  const RANGES=[[0,92],[92,92],[184,92],[276,92]]; // 既存calcChancesと同一区間
-  const valid=[], missing=[];
-  for(const pin of targetPins){
-    const t=resolveTargetT(pin.targetKey);
-    if(!t){ missing.push(pin); continue; } // 未解決対象
-    valid.push({pin, target:{lat:t.lat, lng:t.lng, elev:t.elev, h:t.h}});
-  }
-  for(const pin of missing){ if(onPin) onPin(pin,{status:'target_missing'}); }
-  const callChance=async (pin, target, sunset, off, cnt)=>{
-    let resp;
-    try{
-      resp=await SMApi('chance',{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({ sLat:pin.lat, sLng:pin.lng, sElev:pin.elev,
-          t:{lat:target.lat, lng:target.lng, elev:target.elev, h:target.h},
-          dateStr:startDate, mode:'chance', sunsetMode:sunset, dayOffset:off, dayCount:cnt }) });
-    }catch(fe){ throw fe; } // fetch例外
-    if(!resp.ok){ let txt=''; try{ txt=await resp.text(); }catch(_){}; const e=new Error('http'); e._http=resp.status; e._txt=txt; throw e; }
-    let data; try{ data=await resp.json(); }catch(je){ je._json=true; throw je; }
-    return data;
-  };
-  const shapeOk=(d)=>{
-    if(!d || typeof d!=='object' || !Array.isArray(d.results)) return false;
-    if(!Number.isFinite(d.AZ_THR)) return false;
-    // baseAlt/topAlt はresultまたはメタで有限であること。tAz/targetAngDiamは必須にしない（既存calcChancesもクライアント算出でdataを前提にしないため、欠落時は正規化の ?? data.x で補完し天気透過度等は「--」フォールバック）
-    return d.results.every(r=> Number.isFinite(r.baseAlt ?? d.baseAlt) && Number.isFinite(r.topAlt ?? d.topAlt));
-  };
-  const norm=(r, data, pin, isSun)=>({ ...r, ts:new Date(r.ts), isSun,
-    tAz: r.tAz ?? data.tAz, targetAngDiam: r.targetAngDiam ?? data.targetAngDiam,
-    baseAlt: r.baseAlt ?? data.baseAlt, topAlt: r.topAlt ?? data.topAlt,
-    pLat:pin.lat, pLng:pin.lng, pElev:pin.elev });
-  let idx=0;
-  for(const {pin,target} of valid){
-    idx++;
-    let failed=false, moonResults=[], sunResults=[];
-    // 月4区間 → 太陽4区間（完全直列）。1区間でも失敗したらPin全体を失敗扱い（部分保存しない）
-    const runBody=async (sunset, isSun, arr)=>{
-      for(let ri=0; ri<RANGES.length && !failed; ri++){
-        if(onPin) onPin(pin,{status:'searching', body:isSun?'sun':'moon', seg:ri+1, total:RANGES.length, idx, count:valid.length});
-        const [off,cnt]=RANGES[ri];
-        let data;
-        try{ data=await callChance(pin, target, sunset, off, cnt); }
-        catch(e){ _chanceBatchLogErr(e); failed=true; return; }
-        if(!shapeOk(data)){ console.error('[chance batch] unexpected response shape', data); failed=true; return; }
-        (data.results||[]).forEach(r=>arr.push(norm(r, data, pin, isSun)));
-      }
-    };
-    await runBody(false, false, moonResults);
-    if(!failed) await runBody(true, true, sunResults);
-    if(failed){ if(onPin) onPin(pin,{status:'error'}); continue; }
-    const results=moonResults.concat(sunResults);
-    results.sort((a,b)=>a.ts-b.ts); // ts昇順
-    _pinSearchResults.chance.set(pin.id, {pinId:pin.id, results, updatedAt:Date.now()}); // 0件でも保存
-    if(onPin) onPin(pin,{status: results.length?'ok':'none', results, moon:moonResults.length, sun:sunResults.length});
-  }
-}
-async function runPinChanceBulkSearch(targetPins){
-  if(_pinSearchRunning) return; // 二重起動防止（B-1と共通の実行状態）
-  _pinSearchRunning=true;
-  _setPinSearchBtnsDisabled(true); // 検索中は全検索ボタンを無効化
-  const ps=Array.isArray(targetPins)?targetPins:[];
-  const counts={ok:0,none:0,error:0,missing:0,moon:0,sun:0};
-  try{
-    if(ps.length===0) return;
-    const allPins=loadPins(); allPins.forEach((p,i)=>p._origIdx=i);
-    const idxById=new Map(allPins.map(p=>[p.id,p._origIdx]));
-    const contOf=(pin)=>{ const idx=idxById.has(pin.id)?idxById.get(pin.id):pin._origIdx; return (idx!=null)?document.getElementById(`pin-result-${idx}`):null; };
-    ps.forEach(pin=>{ const c=contOf(pin); if(c) _pinResultMsg(c,'検索待機中'); }); // 開始直後：無表示を作らない
-    const onPin=(pin,res)=>{ // 1Pin確定ごとに逐次描画
-      const c=contOf(pin);
-      if(res.status==='searching'){
-        const bl=res.body==='sun'?'太陽':'月';
-        if(c) _pinResultMsg(c,`⏳ ${bl}チャンス検索中 ${res.seg}/${res.total}`);
-        try{ showHint(`チャンス検索中 ${res.idx}/${res.count}地点・${bl} ${res.seg}/${res.total}`,1500); }catch(e){}
-        return;
-      }
-      if(res.status==='ok'){
-        counts.ok++; counts.moon+=(res.moon||0); counts.sun+=(res.sun||0);
-        if(c) renderPinChanceRows(pin,res.results,c,'chance');
-        const near=res.results.filter(r=>isInForecastRange(r.ts));
-        if(near.length>0){
-          const snap=res.results;
-          ensureBodyWeather(near.map(r=>({lat:r.pLat,lng:r.pLng,ts:r.ts,isSun:r.isSun===true}))).then(()=>{
-            const cur=_pinSearchResults.chance.get(pin.id);
-            if(cur && cur.results===snap){ const c2=contOf(pin); if(c2) renderPinChanceRows(pin,snap,c2,'chance'); } // 古い天気取得で新結果/空を復活させない
-          });
-        }
-      }
-      else if(res.status==='none'){ counts.none++; if(c) renderPinChanceRows(pin,[],c,'chance'); } // 「条件を満たすチャンスなし」
-      else if(res.status==='target_missing'){ counts.missing++; if(c) _pinResultMsg(c,'対象が見つからないため検索できません'); }
-      else { counts.error++; if(c) _pinResultMsg(c,'検索に失敗しました'); }
-    };
-    await searchChanceBatch(ps, onPin);
-    showHint(`チャンス検索完了：成功${counts.ok}件／結果なし${counts.none}件／失敗${counts.error}件`+(counts.missing?`／対象なし${counts.missing}件`:'')+`　月${counts.moon}件／太陽${counts.sun}件`, 4000);
-  } finally {
-    _pinSearchRunning=false;
-    _setPinSearchBtnsDisabled(false); // 検索終了：全検索ボタンを再有効化
-    _pinSearchProgress=null;
-  }
-}
 
 function renamePinAt(idx){
   const pins=loadPins();
@@ -9583,13 +9496,11 @@ function groupPinsByTarget(groupPins){
 // 登録地点検索結果を全消去（種別・範囲を問わず。P3のMap構造は維持しclearのみ）
 function _clearAllPinSearchResults(){
   _pinSearchResults.pinpoint.clear();
-  _pinSearchResults.chance.clear();
 }
 function clearPinSearchResultsForPins(pins){
   for(const pin of pins || []){
     if(!pin || !pin.id) continue;
     _pinSearchResults.pinpoint.delete(pin.id);
-    _pinSearchResults.chance.delete(pin.id);
   }
 }
 // 検索中は全検索ボタンを無効化（📅チャンスはB-2未実装のため常時disabled）。再描画後もdisabledを維持するため生成側でも_pinSearchRunningを見る
@@ -9607,22 +9518,14 @@ function _pinSearchDo(kind, scope){
     _clearAllPinSearchResults();
     renderPinList(scope.prefName); // 検索対象が属する県だけ open（他県は閉じる）
     runPinBulkSearch(scope.pins);  // B-1完成処理へ接続。必ず配列を渡す（全件検索入口は作らない）
-  } else if(kind==='chance'){
-    if(scope.missing){ showHint('保存された対象が見つかりません'); return; } // 削除済み対象グループは検索しない
-    if(!scope.pins.length){ showHint('登録地点がありません'); return; }
-    const ds=document.getElementById('idate').value;
-    if(!ds || !/^\d{4}-\d{2}-\d{2}$/.test(ds)){ showHint('検索開始日を設定してください。'); return; } // 空/不正日付は開始しない
-    _clearAllPinSearchResults();
-    renderPinList(scope.prefName); // 検索対象が属する県だけ open
-    runPinChanceBulkSearch(scope.pins); // 月＋太陽の両方を検索
   } else if(kind==='clear'){
     if(!scope.pins.length){ showHint('消去する検索結果がありません'); return; }
     clearPinSearchResultsForPins(scope.pins);
     renderPinList(scope.prefName);
   }
-  // 📅chance は B-2（ボタン disabled で到達しない）
 }
-// 県/対象見出しに直接置く検索3ボタン（📍ピンポイント / 📅チャンス[disabled] / ✕クリア）。stopPropagationで県アコーディオンを誤発火させない
+// 県/対象見出しに直接置く検索2ボタン（📍ピンポイント / ✕クリア）。stopPropagationで県アコーディオンを誤発火させない
+// 一括チャンスは廃止（通常画面の📅チャンス検索は別途維持）。
 function _makePinSearchBtns(getScope){
   const wrap=document.createElement('div');
   wrap.className='pin-srch-btns';
@@ -9636,7 +9539,6 @@ function _makePinSearchBtns(getScope){
     return b;
   };
   wrap.appendChild(mk('📍 ピンポイント','var(--ac2)','pinpoint'));
-  wrap.appendChild(mk('📅 チャンス','var(--ac)','chance')); // B-2：通常時enabled（検索中は全ボタンdisabled）
   wrap.appendChild(mk('✕ クリア','var(--sub)','clear'));
   return wrap;
 }
@@ -9701,9 +9603,7 @@ function renderPinList(openPrefName){
         resultContainer.style.cssText='border-bottom:1px solid var(--bd);margin-bottom:2px;';
         tp.appendChild(resultContainer);
         const _sp=_pinSearchResults.pinpoint.get(pin.id); // P3: pin.idで保存結果を復元（pinpoint）
-        const _sc=_pinSearchResults.chance.get(pin.id);   //      同（chance）。新検索開始で両Mapclear済みのため通常は片方のみ
         if(_sp && _sp.results) renderPinChanceRows(pin, _sp.results, resultContainer, 'pinpoint'); // 空でも「なし」表示
-        else if(_sc && _sc.results) renderPinChanceRows(pin, _sc.results, resultContainer, 'chance');
       });
       body.appendChild(tp);
     });
@@ -9984,14 +9884,8 @@ function renderChanceList(targetList){
   results.forEach(r=>{
     const dow=new Date(r.date+'T12:00:00+09:00').toLocaleDateString('ja-JP',{weekday:'short'});
     const dowColor=dow.includes('日')?'#ff6655':dow.includes('土')?'#4488ff':'var(--sub)';
-    const moveM=r.distM*Math.tan(r.azDiff*Math.PI/180);
-    let star;
-    if(moveM<=5)        star=`🎯${bodyIcon}🎯`;
-    else if(moveM<=10)  star='★★★';
-    else if(moveM<=50)  star='★★☆';
-    else if(moveM<=100) star='★☆☆';
-    else if(moveM<=200) star='☆☆☆';
-    else                star='―';
+    const moveM=(typeof r.moveM==='number')?r.moveM:r.distM*Math.tan(r.azDiff*Math.PI/180);
+    const star=starOf(moveM, bodyIcon);
     const range=r.topAlt-r.baseAlt;
     const altPct=range>0.001?Math.round((r.alt-r.baseAlt)/range*100):0;
     const swallowMark=(_ct().silhouette==='castle'&&!sunsetMode&&r.angDiam>=targetAngDiam&&altPct>=30&&altPct<=70)?'🔵':'';
@@ -10250,7 +10144,7 @@ function calcChances(){
       btn.textContent=sunsetMode?"📅 チャンス検索（365日）（太陽）":"📅 チャンス検索（365日）";
 
       if(results.length===0){
-        list.textContent="今後365日以内に条件を満たす日はありません。（方位角±"+AZ_THR+"°）";
+        list.textContent="今後365日以内に条件を満たす日はありません。（移動200m以内）";
         updateDrawerIfOpen();
         return;
       }

@@ -219,6 +219,14 @@ export function hav(a,b,c,d){
   const x=Math.sin(dA/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(dB/2)**2;
   return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
 }
+// 順測地線：起点(lat,lng)から方位brgDeg・距離distM(m)先の座標（理想撮影地点P*の配置に使用）
+export function dest(lat,lng,brgDeg,distM){
+  const R=6371000,r=Math.PI/180;
+  const br=brgDeg*r, dR=distM/R, la1=lat*r, lo1=lng*r;
+  const la2=Math.asin(Math.sin(la1)*Math.cos(dR)+Math.cos(la1)*Math.sin(dR)*Math.cos(br));
+  const lo2=lo1+Math.atan2(Math.sin(br)*Math.sin(dR)*Math.cos(la1), Math.cos(dR)-Math.sin(la1)*Math.sin(la2));
+  return { lat:la2/r, lng:((lo2/r+540)%360)-180 };
+}
 export function elAng(dKm,se,te,th){
   const R=6371000;
   const curv=(dKm*1000)**2/(2*R);

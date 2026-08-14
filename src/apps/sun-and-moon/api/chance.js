@@ -4,7 +4,7 @@
 // mode で分岐（'chance' / 'pinpoint'）。期間は365日で統一。
 // 天体計算は _astro.js（共通モジュール）を使用し、ブラウザから秘匿。
 // ============================================================
-import { searchCore } from './_search.js';
+import { searchCore, acceptMove } from './_search.js';
 import { moonAge, jst } from './_astro.js';
 
 // 共通探索エンジン
@@ -17,8 +17,9 @@ import { moonAge, jst } from './_astro.js';
 function search(params){
   const { sLat, sLng, sElev, t, dateStr, mode, sunsetMode, bodyFilter, dayOffset, dayCount } = params;
   const isPin = (mode === 'pinpoint');
-  // 探索刻み：chanceは1分、pinpointは2分（既存挙動を不変に維持）。
-  const step = isPin ? 2 * 60 * 1000 : 60 * 1000;
+  // 探索刻み：chance / pinpoint / 一括pinpoint すべて1分で統一（§12）。
+  // これにより同一撮影地点・対象・日時で通常/一括の代表時刻・m・★が一致する。
+  const step = 60 * 1000;
   let bodyModes;
   if(isPin){
     if(bodyFilter === 'moon') bodyModes = [false];
@@ -27,19 +28,25 @@ function search(params){
   } else {
     bodyModes = [ !!sunsetMode ];
   }
+  // 評価一本化：chance / pinpoint は同じ候補集合・同じ理想点・同じ必要移動距離 m を使う。
+  // 違いは採否フィルタのみ（chance ≤200m / pinpoint ≤30m）。
+  //   ・共通プレフィルタ：方位 ±(200m相当角)。これにより pinpoint 候補は chance 候補の部分集合。
+  //   ・最終採否と★評価は searchCore が代表時刻へ添付する fd.moveM（実移動距離）を正本にする。
+  const MAX_MOVE_M = isPin ? 30 : 200;
   const strategy = {
-    azThr: distM => isPin ? (Math.atan2(30, distM) * 180 / Math.PI) : 2.5,
+    // プレフィルタは searchCore が prefilterBounds(superset) で内部決定するため azThr は未使用。
+    azThr: () => 180,
     buildResult: (fd, ds, isSun, ctx) => {
+      // 採否は fail-closed：収束かつ moveM 閾値内のときのみ採用（NaN/Infinity/未収束は不採用, P0-4）。
+      if(!acceptMove(fd, MAX_MOVE_M)) return null;
       const age = isSun ? null : moonAge(new Date(ds + 'T03:00:00Z'));
       if(isPin){
-        const moveM = ctx.distM * Math.tan(fd.azDiff * Math.PI / 180);
-        if(moveM > 30) return null; // MOVE_THR=30m
-        return { date: ds, time: jst(fd.dt), azDiff: fd.azDiff,
+        return { date: ds, time: jst(fd.dt), azDiff: fd.azDiff, moveM: fd.moveM,
           alt: fd.alt, baseAlt: ctx.baseAlt, topAlt: ctx.topAlt, distM: ctx.distM, age, ts: fd.dt.getTime(),
           angDiam: fd.angDiam, isSun, tAz: ctx.tAz, targetAngDiam: ctx.targetAngDiam,
           pLat: ctx.sLat, pLng: ctx.sLng, pElev: ctx.sElev };
       } else {
-        return { date: ds, time: jst(fd.dt), azDiff: fd.azDiff,
+        return { date: ds, time: jst(fd.dt), azDiff: fd.azDiff, moveM: fd.moveM,
           alt: fd.alt, baseAlt: ctx.baseAlt, topAlt: ctx.topAlt, distM: ctx.distM, age, ts: fd.dt.getTime(),
           angDiam: fd.angDiam };
       }

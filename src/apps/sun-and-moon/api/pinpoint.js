@@ -1,13 +1,15 @@
 // ============================================================
 // functions/api/pinpoint.js
 // POST /api/pinpoint
-// 📍 ピンポイント登録地点検索（MOVE_THR=30m）のサーバ実装。
-// クライアント searchPinChances(pin) の計算を仕様不変で移植。
+// 📍 ピンポイント登録地点検索（採用上限 MOVE_THR=30m）のサーバ実装。
+// 評価は searchCore の現行正本（理想＝天体中心が対象上端中央、moveM＝理想地点P*まで
+// の実移動距離＝横＋前後、P*標高 pElev=sElev、代表＝moveM最小、pinpoint=moveM≤30m、
+// ★=5/10/50/100/200m、moveConverged必須のfail-closed）を通常chance/通常pinpointと共有する。
 // 天体計算は functions/api/_astro.js を再利用（コピーしない）。
 // 対象(target)はクライアントの resolveTargetT() で解決済みを受け取る。
-// chance.js / /api/chance には一切依存しない独立実装。
+// chance.js / /api/chance には状態依存しない独立エンドポイント（評価コアは共通）。
 // ============================================================
-import { searchCore } from './_search.js';
+import { searchCore, acceptMove } from './_search.js';
 import { moonAge, jst } from './_astro.js';
 
 const cors = {
@@ -24,20 +26,21 @@ function jresp(obj, status){
 }
 function jerr(msg, status){ return jresp({ error: msg }, status); }
 
-// searchPinChances(pin) の完全移植。閾値・刻み・月/太陽条件・戻り値項目は不変。
-// 差異は入力元のみ（today=startDate、pin/target=引数、t解決はクライアント側）。
+// searchCore の現行正本評価を用いる（採用上限30m）。閾値・刻み(1分)・月/太陽条件・
+// 戻り値項目は通常pinpoint（/api/chance mode:'pinpoint'）と同一。入力元のみ差異
+// （today=startDate、pin/target=引数、t解決はクライアント側）。
 function pinpointSearch(startDate, days, mode, pin, target){
   const bodyModes = mode === 'moon' ? [false] : mode === 'sun' ? [true] : [false, true];
   const { results } = searchCore(
     { sLat: pin.lat, sLng: pin.lng, sElev: pin.elev, t: target, dateStr: startDate,
       dayOffset: 0, dayCount: days, bodyModes, step: 60 * 1000 },
     {
-      azThr: distM => Math.atan2(30, distM) * 180 / Math.PI,
+      // プレフィルタは searchCore が内部決定（azThr未使用）。採否は収束必須＋fail-closed。
+      azThr: () => 180,
       buildResult: (fd, ds, isSun, ctx) => {
-        const moveM = ctx.distM * Math.tan(fd.azDiff * Math.PI / 180);
-        if(moveM > 30) return null; // MOVE_THR=30m
+        if(!acceptMove(fd, 30)) return null; // fail-closed：収束かつ≤30m（P0-4）
         const age = isSun ? null : moonAge(new Date(ds + 'T03:00:00Z'));
-        return { date: ds, time: jst(fd.dt), azDiff: fd.azDiff,
+        return { date: ds, time: jst(fd.dt), azDiff: fd.azDiff, moveM: fd.moveM,
           alt: fd.alt, baseAlt: ctx.baseAlt, topAlt: ctx.topAlt, distM: ctx.distM, age, ts: fd.dt,
           angDiam: fd.angDiam, isSun, tAz: ctx.tAz, targetAngDiam: ctx.targetAngDiam,
           pLat: ctx.sLat, pLng: ctx.sLng, pElev: ctx.sElev };
