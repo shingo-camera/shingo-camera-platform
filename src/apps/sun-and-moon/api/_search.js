@@ -5,12 +5,15 @@
 //  時刻刻み・候補区間抽出・代表時刻選択・日時ソート」を集約する。
 // 判定（プレフィルタ・候補採否・結果生成）は strategy 側へ分離する。
 // ★現行正本の評価定義（chance / pinpoint 共通）：
-//   ・理想状態＝天体中心が対象上端中央（方位＝対象中央方位／仰角＝上端仰角 topAlt）
-//   ・評価値 moveM＝現在撮影地点から理想地点 P* までの実移動距離（横＋前後を含む）
-//   ・P* の撮影標高は pElev = sElev（同一標高面。正式仕様。Terrain再取得しない）
+//   ・理想領域＝対象上端中央が月・太陽の円盤（半径 R=angDiam/2）内（|angSep(上端中央,天体中心)|≤R）
+//   ・評価値 moveM＝現在撮影地点から「対象上端が円盤内となる撮影地点」までの実移動距離を
+//     2次元地表上で数値的に探索した最短解（円盤内ならば 0m。円盤外のみ最寄り境界までの実移動）
+//   ・中心完全一致地点 P*（天体中心＝対象上端中央）は探索上の補助解であり、最終評価の唯一の理想点ではない
+//   ・P* / 撮影標高は pElev = sElev（同一標高面。正式仕様。Terrain再取得しない）
 //   ・代表時刻＝区間内 moveM 最小（旧・上端高度差最小は不使用）
 //   ・chance = moveM≤200m ／ pinpoint = moveM≤30m ／ ★ = 5/10/50/100/200m
 //   ・moveConverged 必須、NaN/Infinity/未収束は fail-closed
+//   ・R はその時刻の実角半径（bodyPos.angDiam/2 を再利用。固定値を新設しない）
 //   ・通常chance / 通常pinpoint / 一括pinpoint で同一定義
 // 天体計算は functions/api/_astro.js を再利用（コピーしない）。
 // ============================================================
@@ -19,12 +22,11 @@ import { moonPos, sunPos, moonAge, makeSunT, brng, hav, elAng, dest } from './_a
 const _sunT = makeSunT();
 
 // ============================================================
-// 評価一本化：理想撮影地点 P* と「上端中央一致に必要な撮影地点移動距離」m
+// 補助解：中心完全一致地点 P*（天体中心が対象上端中央を通る撮影地点）
 // ------------------------------------------------------------
-// 理想状態（誤差0）＝ 天体中心が対象の上端中央を通る：
-//   (1) 天体中心方位 = 対象中心方位
-//   (2) 天体中心仰角 = 対象上端仰角
-// これを満たす撮影地点 P* を求め、現在地点→P* の実距離を m とする。
+//   (1) 天体中心方位 = 対象中心方位   (2) 天体中心仰角 = 対象上端仰角
+// を満たす P* を求める（時刻探索・代表時刻・収束判定に使用）。最終評価 moveM は
+// これ一点への距離ではなく「対象上端が円盤内となる最寄り地点」までの距離（diskEval）。
 // 横移動だけでなく前後移動（距離D変化＝上端仰角変化）も含む実移動距離。
 // ============================================================
 
@@ -166,6 +168,89 @@ export function idealMove(sLat, sLng, sElev, t, dt, isSun, budgetM){
   return { m: g.m, converged: azErr < 0.02 && altErr < 0.02, iters: 1, azErr, altErr, P: g.P };
 }
 
+// 角距離（(az,alt)球面）。
+function _angSepDeg(az1, al1, az2, al2){
+  const r = Math.PI / 180;
+  const c = Math.sin(al1 * r) * Math.sin(al2 * r)
+          + Math.cos(al1 * r) * Math.cos(al2 * r) * Math.cos((az1 - az2) * r);
+  return Math.acos(Math.max(-1, Math.min(1, c))) / r;
+}
+
+// 新評価（正本）：理想領域＝「対象上端中央が天体円盤(半径 R=angDiam/2)内」。
+// ・円盤内（angSep(上端中央, 天体中心) ≤ R）なら必要移動 moveM = 0m（中心完全一致まで動けても減点しない）。
+// ・円盤外のみ：現在地点 S → 中心完全一致 P* の実移動経路上で
+//     F(x) = angSep(P(x)から見た上端中央, P(x)から見た天体中心) − R(P(x))
+//   を「各 P(x) で天体 az/alt・対象 az/topAlt・R=angDiam/2 を実再評価」して求め、S(F>0)〜P*(F<0) を
+//   二分探索して F=0（円盤境界へ入る最初の点）までの実移動距離を moveM とする（線形近似は使わない）。
+//   複数の中心一致 P* 候補があれば各経路の境界距離を求め最小 moveM を採用。
+// ・R はその時刻の実角半径（既存 bodyPos.angDiam を再利用）。pElev=sElev 維持・magic/新天文計算なし。
+// ・disk moveM ≤ 中心一致 moveM が常に成立するため chance≤200 / pinpoint≤30 の候補は減らない。
+// F(P): 実地点 P で本体を再評価して angSep − R を返す（円盤外で >0、円盤内で <0）。
+function _diskF(pLat, pLng, sElev, t, dt, isSun){
+  const bp = isSun ? sunPos(dt, pLat, pLng) : moonPos(dt, pLat, pLng);
+  const tAz = brng(pLat, pLng, t.lat, t.lng);
+  const topAlt = elAng(hav(pLat, pLng, t.lat, t.lng), sElev, t.elev, t.h);
+  const R = (bp.angDiam || 0.53) / 2;
+  return _angSepDeg(tAz, topAlt, bp.az, bp.alt) - R;
+}
+
+// 円盤外の最終 moveM：現在地点 S から「対象上端が円盤内(F≤0)となる撮影地点」までの実移動距離を
+// 2次元地表上で数値的に探索した最短解。S→中心一致 P* の1本の線には限定しない。
+// F の勾配ニュートン法：各反復で S/現P で F と数値勾配∇F（1m 有限差分・実再評価）を求め、
+// レベル集合 F=0 への方向（−∇F）へ Newton ステップ（step=F/|∇F|）で進み、F=0 境界へ収束させる。
+// （一般の非凸領域に対する数学的 global optimizer ではない。代表的な Sun/Moon・近/遠・方位/高度/両ズレ
+//  fixture で test 専用の 2次元 brute-force oracle 参照値と characterization 一致を確認している。）
+// 全方位高密度 scan はしない。chance の上限(200m)を大きく超える解や勾配消失・発散は対象外（Infinity）。
+const _DISK_MAX_M = 400;
+function _nearestDiskMove(sLat, sLng, sElev, t, dt, isSun){
+  if(_diskF(sLat, sLng, sElev, t, dt, isSun) <= 0) return 0;   // 既に円盤内
+  let pLat = sLat, pLng = sLng;
+  for(let it = 0; it < 16; it++){
+    const F0 = _diskF(pLat, pLng, sElev, t, dt, isSun);
+    if(F0 <= 1e-7) break;
+    const Pe = dest(pLat, pLng, 90, 1), Pn = dest(pLat, pLng, 0, 1);   // 東/北へ1m 有限差分
+    const gE = _diskF(Pe.lat, Pe.lng, sElev, t, dt, isSun) - F0;
+    const gN = _diskF(Pn.lat, Pn.lng, sElev, t, dt, isSun) - F0;
+    const gn = Math.hypot(gE, gN);
+    if(gn < 1e-12) return Infinity;                            // 勾配消失＝進めない
+    const step = F0 / gn;                                      // F=0 まで（線形近似・反復で補正）
+    if(step > _DISK_MAX_M) return Infinity;                    // 遠すぎ＝対象外
+    const brg = (Math.atan2(-gE / gn, -gN / gn) * 180 / Math.PI + 360) % 360;  // −∇F 方向
+    const P = dest(pLat, pLng, brg, step);
+    if(hav(sLat, sLng, P.lat, P.lng) * 1000 > _DISK_MAX_M) return Infinity;
+    pLat = P.lat; pLng = P.lng;
+  }
+  if(_diskF(pLat, pLng, sElev, t, dt, isSun) > 1e-4) return Infinity;  // 円盤内へ到達できず
+  return hav(sLat, sLng, pLat, pLng) * 1000;
+}
+
+export function diskEval(sLat, sLng, sElev, t, dt, isSun){
+  const bp = isSun ? sunPos(dt, sLat, sLng) : moonPos(dt, sLat, sLng);
+  const R = (bp.angDiam || 0.53) / 2;
+  const tAz = brng(sLat, sLng, t.lat, t.lng);
+  const topAlt = elAng(hav(sLat, sLng, t.lat, t.lng), sElev, t.elev, t.h);
+  const angSep0 = _angSepDeg(tAz, topAlt, bp.az, bp.alt);
+  const mvc = idealMove(sLat, sLng, sElev, t, dt, isSun, 200); // 中心一致 P*（補助解・不変）＋収束/代表用
+  if(angSep0 <= R){                                            // 既に円盤内＝理想領域
+    return { moveM: 0, converged: true, inDisk: true, R, angSep0, centerM: mvc.m,
+             azErr: mvc.azErr, altErr: mvc.altErr, iters: mvc.iters, bodyAz: bp.az, bodyAlt: bp.alt, tAz, topAlt };
+  }
+  const m = _nearestDiskMove(sLat, sLng, sElev, t, dt, isSun); // 円盤外：2次元の数値的最短解（勾配ニュートン）
+  // 保証上界：中心一致 P* は円盤内(F<0)なので、S→P* 線上の F=0 境界は必ず存在し ≤ centerM。
+  // 勾配法が発散/未収束(Infinity)でも、この上界により disk moveM ≤ centerM を担保する。
+  let m2 = Infinity;
+  if(isFinite(mvc.m) && mvc.P){
+    const D = mvc.m;
+    const brg = brng(sLat, sLng, mvc.P.lat, mvc.P.lng);
+    const Ff = (fr) => { const P = dest(sLat, sLng, brg, D * fr); return _diskF(P.lat, P.lng, sElev, t, dt, isSun); };
+    if(Ff(1) <= 0){ let lo = 0, hi = 1; for(let k = 0; k < 44; k++){ const md = (lo + hi) / 2; (Ff(md) > 0) ? lo = md : hi = md; } m2 = D * (lo + hi) / 2; }
+  }
+  const best = Math.min(m, m2);
+  const converged = isFinite(best);
+  return { moveM: converged ? best : Infinity, converged, inDisk: false, R, angSep0, centerM: mvc.m,
+           azErr: mvc.azErr, altErr: mvc.altErr, iters: mvc.iters, bodyAz: bp.az, bodyAlt: bp.alt, tAz, topAlt };
+}
+
 // 上端中央一致に必要な撮影地点移動距離が m 以内になり得る候補の、保守的（superset）プレフィルタ境界。
 // ・方位：m ≥ D·sin(azDiff) より azDiff ≤ asin(min(1, budget/D))（budget≥Dなら全方位）
 // ・高度：D* ∈ [D-budget, D+budget]（∵ m ≥ |D-D*|）に対応する上端仰角 elAng の値域 ± 余裕
@@ -252,12 +337,12 @@ export function searchCore(input, strategy){
 
   const emitAt = (ms, isSun, ds) => {
     const dt = new Date(ms);
-    const mv = idealMove(sLat, sLng, sElev, t, dt, isSun, 200);
+    const de = diskEval(sLat, sLng, sElev, t, dt, isSun);   // 新評価：円盤内理想領域までの moveM
     const bp = isSun ? sunPos(dt, sLat, sLng) : moonPos(dt, sLat, sLng);
     const found = {
       dt, az: bp.az, alt: bp.alt, azDiff: Math.abs(_adiff(bp.az, tAz)),
       angDiam: bp.angDiam || 0.53,
-      moveM: mv.m, moveConverged: mv.converged, moveIters: mv.iters, azErr: mv.azErr, altErr: mv.altErr,
+      moveM: de.moveM, moveConverged: de.converged, moveIters: de.iters, azErr: de.azErr, altErr: de.altErr,
     };
     const r = strategy.buildResult(found, ds, isSun, ctx);
     if(r) results.push(r);
