@@ -2138,6 +2138,9 @@ function isInForecastRange(datetime){
   const diff = (new Date(datetime) - new Date()) / (1000*60*60*24);
   return diff <= 16;
 }
+// ユーザー向け表示時刻（方位一致・r.date+r.time）由来の Date。天気・高度%は内部正準ts(moveM最小)ではなく
+// この表示時刻に揃える（クリック時のプレビュー setChance も r.date+r.time を使用）。
+function _wxDate(r){ return new Date(`${r.date}T${r.time}:00+09:00`); }
 
 function _weatherCellKey(lat, lng){
   return `${(Math.round(lat*10)/10).toFixed(1)},${(Math.round(lng*10)/10).toFixed(1)}`;
@@ -9244,8 +9247,8 @@ function renderPinChanceRows(pin, results, container, kind){
 
     // 天気
     let weatherStr='';
-    if(isInForecastRange(r.ts)){
-      const w=getBodyWeatherAt(r.pLat,r.pLng,r.ts,r.isSun===true);
+    if(isInForecastRange(_wxDate(r))){
+      const w=getBodyWeatherAt(r.pLat,r.pLng,_wxDate(r),r.isSun===true);
       if(w){
         const transp=calcTransparency(w.vis,r.pLat,r.pLng,r.tAz,r.alt);
         const rain=w.precip!==null?`${w.precip}%`:'--';
@@ -9342,10 +9345,10 @@ async function runPinBulkSearch(targetPins){
       if(res.status==='ok'){
         counts.ok++;
         if(c) renderPinChanceRows(pin,res.results,c);
-        const near=res.results.filter(r=>isInForecastRange(r.ts));
+        const near=res.results.filter(r=>isInForecastRange(_wxDate(r)));
         if(near.length>0){
           const snap=res.results;
-          ensureBodyWeather(near.map(r=>({lat:r.pLat,lng:r.pLng,ts:r.ts,isSun:r.isSun===true}))).then(()=>{
+          ensureBodyWeather(near.map(r=>({lat:r.pLat,lng:r.pLng,ts:_wxDate(r),isSun:r.isSun===true}))).then(()=>{
             const cur=_pinSearchResults.pinpoint.get(pin.id);
             if(cur && cur.results===snap){ const c2=contOf(pin); if(c2) renderPinChanceRows(pin,snap,c2); } // 古い天気取得で新結果/空を復活させない（chance側と同方式）
           });
@@ -9893,8 +9896,8 @@ function renderChanceList(targetList){
       ?`移${Math.round(moveM)}m 高${altPct}%`
       :`月齢${r.age.toFixed(1)}日 移${Math.round(moveM)}m 高${altPct}%${swallowMark}`;
     let weatherStr='';
-    if(isInForecastRange(r.ts)){
-      const w=getBodyWeatherAt(sLat,sLng,r.ts,r.isSun===true);
+    if(isInForecastRange(_wxDate(r))){
+      const w=getBodyWeatherAt(sLat,sLng,_wxDate(r),!!sunsetMode);
       if(w){
         const transp=calcTransparency(w.vis,sLat,sLng,tAz,r.alt);
         const rain=w.precip!==null?`${w.precip}%`:'--';
@@ -9969,8 +9972,8 @@ function renderFullMoonList(targetList){
     else                star='―';
     const swallowMark=(_ct().silhouette==='castle'&&r.angDiam>=targetAngDiam&&altPct>=30&&altPct<=70)?'🔵':'';
     let weatherStr='';
-    if(isInForecastRange(r.ts)){
-      const w=getBodyWeatherAt(sLat,sLng,r.ts,r.isSun===true);
+    if(isInForecastRange(_wxDate(r))){
+      const w=getBodyWeatherAt(sLat,sLng,_wxDate(r),false);
       if(w){
         const transp=calcTransparency(w.vis,sLat,sLng,tAz,r.alt);
         const rain=w.precip!==null?`${w.precip}%`:'--';
@@ -10082,9 +10085,9 @@ function runPinPointChance(){
       renderPinPointChanceList();
       updateDrawerIfOpen();
       // 天気取得して再描画
-      const nearResults=merged.filter(r=>isInForecastRange(r.ts));
+      const nearResults=merged.filter(r=>isInForecastRange(_wxDate(r)));
       if(nearResults.length>0){
-        ensureBodyWeather(nearResults.map(r=>({lat:r.pLat,lng:r.pLng,ts:r.ts,isSun:r.isSun===true}))).then(()=>{
+        ensureBodyWeather(nearResults.map(r=>({lat:r.pLat,lng:r.pLng,ts:_wxDate(r),isSun:r.isSun===true}))).then(()=>{
           renderPinPointChanceList();
           updateDrawerIfOpen();
         });
@@ -10153,9 +10156,9 @@ function calcChances(){
       _chanceCtx={tAz,targetAngDiam,bodyIcon};
       renderChanceList();
       updateDrawerIfOpen();
-      const nearResults=results.filter(r=>isInForecastRange(r.ts));
+      const nearResults=results.filter(r=>isInForecastRange(_wxDate(r)));
       if(nearResults.length>0){
-        ensureBodyWeather(nearResults.map(r=>({lat:sLat,lng:sLng,ts:r.ts,isSun:r.isSun===true}))).then(()=>{
+        ensureBodyWeather(nearResults.map(r=>({lat:sLat,lng:sLng,ts:_wxDate(r),isSun:!!sunsetMode}))).then(()=>{
           renderChanceList();
           updateDrawerIfOpen();
         });
@@ -10215,9 +10218,9 @@ function calcFullMoonChances(){
       renderFullMoonList();
       updateDrawerIfOpen();
       // 16日以内の全件：各件の日時1日分だけ軽量取得して再描画
-      const nearResults=results.filter(r=>isInForecastRange(r.ts));
+      const nearResults=results.filter(r=>isInForecastRange(_wxDate(r)));
       if(nearResults.length>0){
-        ensureBodyWeather(nearResults.map(r=>({lat:sLat,lng:sLng,ts:r.ts,isSun:r.isSun===true}))).then(()=>{
+        ensureBodyWeather(nearResults.map(r=>({lat:sLat,lng:sLng,ts:_wxDate(r),isSun:false}))).then(()=>{
           renderFullMoonList();
           updateDrawerIfOpen();
         });
