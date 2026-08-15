@@ -335,12 +335,41 @@ export function searchCore(input, strategy){
     return (a + b) / 2;
   };
 
+  // 表示用の「方位一致時刻」：|bodyAz − targetAz| が最小になる時刻を代表時刻(ms=moveM最小)の近傍で求める。
+  // 表示時刻・高度%はこの時刻の天体中心を使う（評価 moveM/★ は別＝moveM最小時刻のまま）。sub-minute で
+  // 求め UI は1分丸め。方位差は event 近傍で単調→単峰なので golden-section で内部最小を取る。
+  const azDiffAt = (mms, isSun) => {
+    const bp = isSun ? sunPos(new Date(mms), sLat, sLng) : moonPos(new Date(mms), sLat, sLng);
+    return Math.abs(_adiff(bp.az, tAz));
+  };
+  const azMatchTime = (centerMs, isSun) => {
+    const W = 30 * 60000;                         // ±30分窓（event近傍）
+    const gr = (Math.sqrt(5) - 1) / 2;
+    let a = centerMs - W, b = centerMs + W;
+    let c = b - gr * (b - a), d = a + gr * (b - a);
+    let fc = azDiffAt(c, isSun), fd = azDiffAt(d, isSun);
+    for(let it = 0; it < 34; it++){
+      if(fc < fd){ b = d; d = c; fd = fc; c = b - gr * (b - a); fc = azDiffAt(c, isSun); }
+      else       { a = c; c = d; fc = fd; d = a + gr * (b - a); fd = azDiffAt(d, isSun); }
+    }
+    const tm = (a + b) / 2;
+    // 窓端に張り付いた（=窓内に方位一致が無い・単調）なら代表時刻へフォールバック。
+    if(azDiffAt(tm, isSun) > azDiffAt(centerMs, isSun) + 1e-9) return centerMs;
+    return tm;
+  };
+
   const emitAt = (ms, isSun, ds) => {
-    const dt = new Date(ms);
-    const de = diskEval(sLat, sLng, sElev, t, dt, isSun);   // 新評価：円盤内理想領域までの moveM
-    const bp = isSun ? sunPos(dt, sLat, sLng) : moonPos(dt, sLat, sLng);
+    const dtMove = new Date(ms);
+    const de = diskEval(sLat, sLng, sElev, t, dtMove, isSun);   // 評価（moveM/★/採否）：moveM最小時刻のまま不変
+    // 表示時刻＝方位一致時刻（1分丸め）。ts・date・重複判定・ソートは正準時刻(moveM最小)のまま維持。
+    let dispMs = Math.round(azMatchTime(ms, isSun) / 60000) * 60000;
+    if(new Date(dispMs).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }) !== ds) dispMs = Math.round(ms / 60000) * 60000;
+    const dtDisp = new Date(dispMs);
+    const bp = isSun ? sunPos(dtDisp, sLat, sLng) : moonPos(dtDisp, sLat, sLng);  // 表示時刻の天体中心（高度%はこの alt）
     const found = {
-      dt, az: bp.az, alt: bp.alt, azDiff: Math.abs(_adiff(bp.az, tAz)),
+      dt: dtMove,             // 正準時刻（ts/date/重複/ソート用：不変）
+      dispDt: dtDisp,         // 表示時刻（方位一致・1分丸め。buildResult の time はこれを使う）
+      az: bp.az, alt: bp.alt, azDiff: Math.abs(_adiff(bp.az, tAz)),  // 高度%・表示は方位一致時刻の天体中心
       angDiam: bp.angDiam || 0.53,
       moveM: de.moveM, moveConverged: de.converged, moveIters: de.iters, azErr: de.azErr, altErr: de.altErr,
     };
