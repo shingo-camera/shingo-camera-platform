@@ -17,9 +17,8 @@
 //   ・通常chance / 通常pinpoint / 一括pinpoint で同一定義
 // 天体計算は functions/api/_astro.js を再利用（コピーしない）。
 // ============================================================
-import { moonPos, sunPos, moonAge, makeSunT, brng, hav, elAng, dest } from './_astro.js';
+import { moonPos, sunPos, brng, hav, elAng, dest } from './_astro.js';
 
-const _sunT = makeSunT();
 
 // ============================================================
 // 補助解：中心完全一致地点 P*（天体中心が対象上端中央を通る撮影地点）
@@ -283,7 +282,7 @@ export function acceptMove(fd, maxMoveM){
 
 // 時刻探索と最終 moveM 採否を分離（P0-1/2/3）：
 //  ・粗1分走査で「月/太陽が対象上端付近を通過する時間区間」を bracket（alt交差 g=bodyAlt-topAlt の
-//    符号変化＋グレーズ=|g|局所最小。az は superset ゲート asin(200/D)+余裕、太陽は出没±30分窓）。
+//    符号変化＋グレーズ=|g|局所最小。az は superset ゲート asin(200/D)+余裕）。
 //    ここでは「その1分に200m以内で完全一致」を要求しない（区間検出のみ）。
 //  ・各 bracket 内で moveM(t) を golden-section 最小化して代表時刻を求める（分間イベントも解ける）。
 //  ・代表時刻の moveM を採否正本にし、chance≤200 / pinpoint≤30 でフィルタ（採否は buildResult 側）。
@@ -383,26 +382,19 @@ export function searchCore(input, strategy){
       const ds = baseDate.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
       const dayStart = new Date(ds + 'T00:00:00+09:00');
 
-      if(!isSun){
-        const age = moonAge(new Date(ds + 'T03:00:00Z'));
-        const illum = (1 - Math.cos(2 * Math.PI * age / 29.53058867)) / 2;
-        if(illum < 0.01) continue;
-      }
+      // A-2: 旧 Moon illum<0.01 の日スキップは撤去。幾何的 chance 検索では月の照度は候補の成否に
+      //  無関係（円盤の角径は照度によらず存在）で、商品仕様でもないため、検索不能にしない（完全性優先）。
+      //  月齢 age は buildResult 側で別途算出するため、ここでは不要。
 
-      let sunRiseMs = null, sunSetMs = null;
-      if(isSun){
-        const sun = _sunT(new Date(ds + 'T03:00:00Z'), t.lat, t.lng);
-        if(sun){
-          sunRiseMs = sun.rise ? sun.rise.getTime() : null;
-          sunSetMs  = sun.set  ? sun.set.getTime()  : null;
-        }
-      }
+      // A: 旧 太陽 rise/set ±30分の inWin 固定窓は撤去（未指定・非対称の hard gate で、高仰角の遠距離
+      //  対象＝本栖湖ダイヤモンド富士 07:47 等の真の disk 候補を diskEval 到達前に落としていた）。
+      //  太陽も月と同様、固定時間窓なしで candidate detection へ通す（active は azGate のみで判定）。
 
       // 粗1分走査で bracket を収集。検出は「真の moveM(t) の局所最小」を主軸にする
       //  （近距離では moveM≤200 が大角度離れた点でも成立するため、角距離や alt 差では取りこぼす）。
       //  併せて (a) alt交差 g の符号変化（遠距離 sub-minute 交差の保険）、
-      //  (b) active ラン（az ゲート内の連続区間）の両端（窓境界にある最小の保険）も bracket 化する。
-      //  active は az superset ゲート内・（太陽は）出没±30分窓内。moveM は探索ゲートに使わない（P0-1）。
+      //  (b) active ラン（az ゲート内の連続区間）の両端（ラン境界の最小の保険）も bracket 化する。
+      //  active は az superset ゲート内（太陽の出没窓・月の照度スキップは撤去済み）。moveM は探索ゲートに使わない（P0-1）。
       const brackets = [];
       let m2 = null, m1 = null;     // 直近2 active（moveM局所最小検出）: {ms, m}
       let gPrev = null;             // 直近 active（alt交差検出）: {ms, g}
@@ -412,13 +404,10 @@ export function searchCore(input, strategy){
         const dt = new Date(ms);
         const bp = isSun ? sunPos(dt, sLat, sLng) : moonPos(dt, sLat, sLng);
         const azD = Math.abs(_adiff(bp.az, tAz));
-        let inWin = true;
-        if(isSun){
-          const afterRise = sunRiseMs && ms >= sunRiseMs && ms <= sunRiseMs + 30 * 60000;
-          const beforeSet = sunSetMs && ms >= sunSetMs - 30 * 60000 && ms <= sunSetMs;
-          inWin = !!(afterRise || beforeSet);
-        }
-        const active = (azD <= azGate) && inWin;
+        // A: active は azGate（superset）のみで判定。太陽の rise/set 窓・月の照度スキップは撤去。
+        //  azGate = asin(200/D)+1.0° は「200m移動＋天体円半径R＋数値誤差」を含めても真の chance 候補
+        //  （disk_moveM≤200）を絶対に落とさない superset（回帰テストで証明）。
+        const active = (azD <= azGate);
         if(active){
           const g = bp.alt - topAlt;
           const cm = coarseMoveGeo(sLat, sLng, sElev, t, bp.az, bp.alt, distM);   // 検出専用 軽量moveM
