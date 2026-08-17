@@ -532,12 +532,10 @@ test("[実ファイル] 商品カード hover は product-card 共通・is-disab
 });
 
 /* §6: 新 Earth アイコン（正方形・縮小のみ） */
-test("[実ファイル] Earth アイコンは 256x256 の正方形アセット（§6）", async () => {
-  const { execSync } = await import("node:child_process");
-  const out = execSync(
-    `python3 -c "from PIL import Image;i=Image.open('public/assets/icons/hanabi-google-earth.png');print(i.size==(256,256))"`,
-  ).toString().trim();
-  assert.equal(out, "True");
+test("[実ファイル] Earth アイコンは 256x256 の正方形アセット（§6）", () => {
+  const png = readFileSync("public/assets/icons/hanabi-google-earth.png");
+  assert.equal(png.readUInt32BE(16), 256);
+  assert.equal(png.readUInt32BE(20), 256);
 });
 
 /* §9: CTA 3 分類が共通クラス */
