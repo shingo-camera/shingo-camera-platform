@@ -81,7 +81,7 @@ test("[実ファイル] success は pending を無条件削除せず、operation
 /* 2. success 未ログイン導線: login redirect に success の pathname+query を渡す */
 test("[実ファイル] success 未ログイン時に login へ現在URL(session_id含む)で戻す導線を出す", () => {
   assert.match(successHtml, /location\.pathname \+ location\.search/);
-  assert.match(successHtml, /\/login\/\?redirect=/);
+  assert.ok(successHtml.includes(`appUrl("/login/") + "?redirect="`), "login redirect appUrl");
   assert.match(successHtml, /ログインして購入状態を確認する/);
 });
 
@@ -196,7 +196,7 @@ test("[実ファイル] initStore は未ログインでも商品を表示し、�
   // 未ログインでも rows を描画（storeSelectRow 呼び出し）
   assert.match(fn, /storeSelectRow\(m, !!grantedSet\[m\.code\], !!token\)/);
   // 購入ボタン押下時、未ログインならログインへ誘導
-  assert.match(fn, /if \(!token\)[\s\S]*?\/login\/\?redirect=/);
+  assert.ok(/if \(!token\)[\s\S]*?appUrl\("\/login\/"\) \+ "\?redirect="/.test(fn), "store login redirect appUrl");
 });
 
 /* 項目4: 購入済み表示の明確化＋利用する導線 */
@@ -235,7 +235,7 @@ test("[実ファイル] note 移行は常時ログイン案内を出さず、移
   assert.doesNotMatch(migrationHtmlW, /setLoginPrompt/);
   assert.doesNotMatch(migrationHtmlW, /移行・確認にはログインが必要です/);
   // 「移行する」押下時の LOGIN 誘導（redirect 付き）は存在する
-  assert.match(migrationHtmlW, /\/login\/\?redirect=/);
+  assert.ok(migrationHtmlW.includes(`appUrl("/login/") + "?redirect="`), "migration login redirect appUrl");
   assert.match(migrationHtmlW, /migration\/note/);
 });
 
@@ -301,9 +301,9 @@ test("[実ファイル] 意図しない /home/ 参照が残っていない（§3
 
 /* §4/§5: ヘッダー最終仕様 + ADMIN */
 test("[実ファイル] ヘッダーは HOME/STORE/(MY PAGE)/(ADMIN)/SUPPORT + LOGIN/LOGOUT", () => {
-  assert.match(siteJsN, /<a href="\/">HOME<\/a>/);
-  assert.match(siteJsN, /<a href="\/mypage\/">MY PAGE<\/a>/);
-  assert.match(siteJsN, /isAdminUser \? '<a href="\/admin\/">ADMIN<\/a>' : ''/);
+  assert.ok(siteJsN.includes(`appUrl("/") + '">HOME</a>`), "header HOME appUrl");
+  assert.ok(siteJsN.includes(`appUrl("/mypage/") + '">MY PAGE</a>`), "header MY PAGE appUrl");
+  assert.ok(siteJsN.includes(`appUrl("/admin/") + '">ADMIN</a>`), "header ADMIN appUrl");
   // ADMIN 判定は既存 admin API の 200/403（新判定を作らない）
   assert.match(siteJsN, /\/api\/admin\/dashboard/);
 });
@@ -321,19 +321,19 @@ test("[実ファイル] ハンバーガーメニュー（aria/ESC/外クリッ�
 
 /* §7/§8: LOGIN は中継地点 */
 test("[実ファイル] LOGIN redirect なしは /mypage/ へ、ログイン済みは即遷移", () => {
-  assert.match(authJsN, /dest \|\| "\/mypage\/"/);
+  assert.ok(authJsN.includes(`dest || appUrl("/mypage/")`), "dest||mypage appUrl");
   // ログイン済み分岐でも dest || /mypage/ へ遷移（フォームに留めない）
   const m = authJsN.match(/既にログイン済みなら LOGIN フォームへ留めない[\s\S]*?\}\)\(\);/);
   assert.ok(m);
-  assert.match(m[0], /window\.location\.href = dest \|\| "\/mypage\/"/);
+  assert.ok(m[0].includes(`window.location.href = dest || appUrl("/mypage/")`), "login default mypage appUrl");
 });
 
 /* §10: SIGNUP redirect 引継 */
 test("[実ファイル] SIGNUP は redirect を emailRedirectTo=/login/?redirect= へ引継ぐ", () => {
   assert.match(authJsN, /var dest = safeRedirectPath\(\)/);
-  assert.match(authJsN, /"\/login\/" \+\s*\(dest \? "\?redirect=" \+ encodeURIComponent\(dest\) : ""\)/);
+  assert.ok(authJsN.includes(`appUrl("/login/") +`) && authJsN.includes(`dest ? "?redirect=" + encodeURIComponent(dest) : ""`), "signup emailRedirect appUrl");
   // LOGIN 画面の SIGNUP リンクにも引継
-  assert.match(authJsN, /a\[href="\/signup\/"\]/);
+  assert.ok(authJsN.includes(`appUrl("/signup/")`), "signup selector/href appUrl");
 });
 
 /* §12/§26: STORE 常時ログイン案内の削除 */
@@ -364,7 +364,10 @@ test("[実ファイル] EARTH は正式名と専用アイコンを持つ", () =>
 /* §17/§18/§19: カード CTA（所有状態出し分け・別タブ・EARTH 起動導線なし） */
 test("[実ファイル] HOME カード CTA は granted+appUrl で「利用する」（別タブ）、EARTH は起動導線を作らない", () => {
   const fn = siteJsN.match(/function productLinksHtml[\s\S]*?\n  \}/)[0];
-  assert.match(fn, /granted && meta\.appUrl/);
+  // 起動 href は launchHref(meta)（= appUrl リゾルバ経由）で /dev を保つ。生 meta.appUrl は使わない。
+  assert.match(fn, /launchHref\(meta\)/);
+  assert.match(fn, /granted && lh/);
+  assert.doesNotMatch(fn, /esc\(meta\.appUrl\)/);
   assert.match(fn, /target="_blank" rel="noopener noreferrer">利用する/);
   // granted でも appUrl 無しは所有バッジのみ（EARTH: 架空 appUrl を作らない）
   assert.match(fn, /badge badge-owned/);
@@ -382,7 +385,7 @@ test("[実ファイル] MY PAGE/STORE の「利用する」も別タブ（§19�
 /* §11: MY PAGE 未購入は STORE へ */
 test("[実ファイル] MY PAGE の未購入カードは STORE へ誘導する", () => {
   const avail = siteJsN.match(/function availableCard[\s\S]*?\n  \}/)[0];
-  assert.match(avail, /href="\/store\/">STORE で購入/);
+  assert.ok(avail.includes(`appUrl("/store/") + '">STORE で購入`), "avail STORE購入 appUrl");
 });
 
 /* §17: note リンクは URL 未設定なら出さない共通関数 */
@@ -395,7 +398,7 @@ test("[実ファイル] noteLinkHtml は URL 未設定で空を返す（壊れ�
 /* §23: LOGOUT → HOME */
 test("[実ファイル] LOGOUT は HOME `/` へ遷移する", () => {
   const lo = siteJsN.match(/async function logout[\s\S]*?\n  \}/)[0];
-  assert.match(lo, /window\.location\.href = "\/"/);
+  assert.ok(lo.includes(`window.location.href = appUrl("/")`), "logout HOME appUrl");
 });
 
 /* ============ rev10 実機確認による UI 追加修正の実ファイル検証 ============ */
@@ -453,7 +456,7 @@ test("[実ファイル] HOME/STORE/MY PAGE の CTA が統一体系（§6）", ()
   const fn = siteJsR.match(/function productLinksHtml[\s\S]*?\n  \}/)[0];
   // HOME: Primary/Secondary が btn 体系、note は noteLinkHtml 共通
   assert.match(fn, /class="btn btn-sm" href.*利用する/);
-  assert.match(fn, /class="btn btn-sm secondary" href="\/store\/">STORE で見る/);
+  assert.ok(fn.includes(`class="btn btn-sm secondary" href="' + appUrl("/store/") + '">STORE で見る`), "STORE で見る appUrl");
   assert.match(fn, /noteLinkHtml\(code\)/);
   // 旧 pc-link 主導線が廃止されている
   assert.doesNotMatch(fn, /pc-link app/);
@@ -542,7 +545,7 @@ test("[実ファイル] CTA: Primary/Secondary/Information が共通クラス（
   // STORE 購入済みの利用する（Primary）
   assert.match(siteJsZ, /btn btn-sm sr-use/);
   // MY PAGE の STORE で購入（Secondary）
-  assert.match(siteJsZ, /btn btn-sm secondary" href="\/store\/">STORE で購入/);
+  assert.ok(siteJsZ.includes(`btn btn-sm secondary" href="' + appUrl("/store/") + '">STORE で購入`), "STORE で購入 appUrl");
   // note（Information）は noteLinkHtml 共通（sr-note）
   assert.match(siteJsZ, /class="sr-note"/);
 });

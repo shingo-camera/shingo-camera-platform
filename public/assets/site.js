@@ -23,7 +23,7 @@
   var saleInfoLoaded = false;   // /api/products の取得に成功したか
   async function loadSaleInfo() {
     try {
-      var res = await fetch("/api/products");
+      var res = await apiFetch("/api/products");
       if (!res.ok) { saleInfoLoaded = false; return; }
       var body = await res.json();
       ((body.data && body.data.products) || []).forEach(function (p) {
@@ -156,7 +156,7 @@
   function getClient() {
     if (clientPromise) return clientPromise;
     clientPromise = (async function () {
-      var res = await fetch("/api/config", { headers: { "X-Device-Id": deviceId } });
+      var res = await apiFetch("/api/config", { headers: { "X-Device-Id": deviceId } });
       if (!res.ok) return null;
       var body = await res.json();
       if (!self.supabase || !self.supabase.createClient) return null;
@@ -175,7 +175,7 @@
     if (client) { try { await client.auth.signOut(); } catch (e) { /* noop */ } }
     isAdminUser = false;
     // LOGOUT 後は HOME へ（§23）。MY PAGE / ADMIN 等のログイン表示に留まらない。
-    window.location.href = "/";
+    window.location.href = appUrl("/");
   }
   function authHeaders(token) {
     var h = { "X-Device-Id": deviceId };
@@ -192,7 +192,7 @@
   async function checkAdmin(token) {
     if (!token) { isAdminUser = false; return; }
     try {
-      var res = await fetch("/api/admin/dashboard", { headers: authHeaders(token) });
+      var res = await apiFetch("/api/admin/dashboard", { headers: authHeaders(token) });
       isAdminUser = res.ok;
     } catch (e) { isAdminUser = false; }
   }
@@ -203,13 +203,13 @@
     var brand = CFG.brandName || "shingo_camera";
     // ヘッダー最終仕様（§4）: HOME / STORE / (MY PAGE) / (ADMIN) / SUPPORT / LOGIN or LOGOUT
     var links = loggedIn
-      ? ('<a href="/">HOME</a><a href="/store/">STORE</a><a href="/mypage/">MY PAGE</a>' +
-         (isAdminUser ? '<a href="/admin/">ADMIN</a>' : '') +
-         '<a href="/support/">SUPPORT</a><a href="#" id="nav-logout">LOGOUT</a>')
-      : '<a href="/">HOME</a><a href="/store/">STORE</a><a href="/support/">SUPPORT</a><a href="/login/" class="btn-login">LOGIN</a>';
+      ? ('<a href="' + appUrl("/") + '">HOME</a><a href="' + appUrl("/store/") + '">STORE</a><a href="' + appUrl("/mypage/") + '">MY PAGE</a>' +
+         (isAdminUser ? '<a href="' + appUrl("/admin/") + '">ADMIN</a>' : '') +
+         '<a href="' + appUrl("/support/") + '">SUPPORT</a><a href="#" id="nav-logout">LOGOUT</a>')
+      : '<a href="' + appUrl("/") + '">HOME</a><a href="' + appUrl("/store/") + '">STORE</a><a href="' + appUrl("/support/") + '">SUPPORT</a><a href="' + appUrl("/login/") + '" class="btn-login">LOGIN</a>';
     el.innerHTML =
       '<div class="container inner">' +
-      '<a class="site-brand" href="/">' + esc(brand) + '<span class="brand-labo">LABO</span></a>' +
+      '<a class="site-brand" href="' + appUrl("/") + '">' + esc(brand) + '<span class="brand-labo">LABO</span></a>' +
       '<button class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="site-nav-menu" aria-label="メニューを開く">&#9776;</button>' +
       '<nav class="site-nav" id="site-nav-menu">' + links + '</nav>' +
       '</div>';
@@ -262,10 +262,10 @@
       '<div class="f-links">' +
         snsLink("Instagram", sns.instagram) +
         snsLink("note", sns.note) +
-        '<a href="/terms/">利用規約</a>' +
-        '<a href="/privacy/">プライバシー</a>' +
-        '<a href="/commercial-transactions/">特商法</a>' +
-        '<a href="/support/">お問い合わせ</a>' +
+        '<a href="' + appUrl("/terms/") + '">利用規約</a>' +
+        '<a href="' + appUrl("/privacy/") + '">プライバシー</a>' +
+        '<a href="' + appUrl("/commercial-transactions/") + '">特商法</a>' +
+        '<a href="' + appUrl("/support/") + '">お問い合わせ</a>' +
       '</div>' +
       '</div>';
   }
@@ -299,12 +299,13 @@
     // CTA デザイン統一（§6）: Primary=利用する(.btn) / Secondary=STORE で見る(.btn.secondary) /
     // note=詳しく見る(.sr-note テキストリンク)。HOME/STORE/MY PAGE で同一体系。
     var mainHtml;
-    if (granted && meta.appUrl) {
-      mainHtml = '<a class="btn btn-sm" href="' + esc(meta.appUrl) + '" target="_blank" rel="noopener noreferrer">利用する</a>';
+    var lh = launchHref(meta);
+    if (granted && lh) {
+      mainHtml = '<a class="btn btn-sm" href="' + esc(lh) + '" target="_blank" rel="noopener noreferrer">利用する</a>';
     } else if (granted) {
       mainHtml = '<span class="badge badge-owned">購入済み</span>';
     } else {
-      mainHtml = '<a class="btn btn-sm secondary" href="/store/">STORE で見る</a>';
+      mainHtml = '<a class="btn btn-sm secondary" href="' + appUrl("/store/") + '">STORE で見る</a>';
     }
     return mainHtml + noteLinkHtml(code);
   }
@@ -312,7 +313,7 @@
   // ---- /home ランチャー ----
   async function initMypage() {
     var token = await getToken();
-    if (!token) { window.location.href = "/login/?redirect=" + encodeURIComponent("/mypage/"); return; }
+    if (!token) { window.location.href = appUrl("/login/") + "?redirect=" + encodeURIComponent(appUrl("/mypage/")); return; }
 
     var ownedEl = document.getElementById("owned-products");
     var availEl = document.getElementById("available-products");
@@ -321,8 +322,8 @@
     // 商品権限一覧（granted/available）
     var products = [];
     try {
-      var res = await fetch("/api/account/products", { headers: authHeaders(token) });
-      if (res.status === 401) { window.location.href = "/login/?redirect=" + encodeURIComponent("/mypage/"); return; }
+      var res = await apiFetch("/api/account/products", { headers: authHeaders(token) });
+      if (res.status === 401) { window.location.href = appUrl("/login/") + "?redirect=" + encodeURIComponent(appUrl("/mypage/")); return; }
       if (res.ok) { var body = await res.json(); products = (body.data && body.data.products) || []; }
     } catch (e) { /* 表示は空で継続 */ }
 
@@ -349,13 +350,13 @@
     // note 移行導線（既存HANABI購入者）
     if (noteEl) {
       try {
-        var mres = await fetch("/api/migrations/note/status", { headers: authHeaders(token) });
+        var mres = await apiFetch("/api/migrations/note/status", { headers: authHeaders(token) });
         if (mres.ok) {
           // note 購入者向けの権限復元入口は STORE 内に集約。ここでは STORE へ誘導するのみ。
           noteEl.innerHTML =
             '<h2>note で購入された方</h2>' +
             '<p class="text-muted">note で購入した HANABI PLANNER の移行・権限の復元は STORE から行えます。</p>' +
-            '<a class="btn secondary" href="/store/">STORE を見る</a>';
+            '<a class="btn secondary" href="' + appUrl("/store/") + '">STORE を見る</a>';
           noteEl.classList.remove("hidden");
         }
       } catch (e) { /* 導線は任意表示 */ }
@@ -364,9 +365,9 @@
 
   function ownedCard(p) {
     var meta = productMeta(p.code);
-    var appUrl = meta && meta.appUrl ? meta.appUrl : null;
-    var action = appUrl
-      ? '<a class="btn btn-sm" href="' + esc(appUrl) + '" target="_blank" rel="noopener noreferrer">利用する</a>'
+    var launchUrl = launchHref(meta);
+    var action = launchUrl
+      ? '<a class="btn btn-sm" href="' + esc(launchUrl) + '" target="_blank" rel="noopener noreferrer">利用する</a>'
       : '<span class="btn disabled">準備中</span>';
     return launchCardHtml(meta, p, action);
   }
@@ -377,7 +378,7 @@
     // SUBSCRIPTION は実決済未対応のため購入不可。取得できない場合も安全側（準備中）。
     var onSale = (p.purchaseEnabled === true && p.saleType === "ONE_TIME");
     var action = onSale
-      ? '<a class="btn btn-sm secondary" href="/store/">STORE で購入</a>'
+      ? '<a class="btn btn-sm secondary" href="' + appUrl("/store/") + '">STORE で購入</a>'
       : '<span class="badge">' + esc((meta && meta.badge) || "準備中") + '</span>';
     return launchCardHtml(meta, p, action);
   }
@@ -404,6 +405,13 @@
     return (CFG.products && CFG.products[code]) || null;
   }
 
+  // アプリ起動 href の正本。商品設定の appUrl（ルート相対 "/apps/xxx/"）を、必ず appUrl() リゾルバに
+  // 通して返す（DEV は /dev 前置、Production は不変、外部 URL は不変）。未統合(null)は null。
+  // 「利用する」等の起動導線は全てこれを使い、meta.appUrl を素の href に入れない（DEV 脱出防止・共通）。
+  function launchHref(meta) {
+    return meta && meta.appUrl ? appUrl(meta.appUrl) : null;
+  }
+
   // ---- 商品詳細（SUN AND MOON）購入導線 ----
   async function initSunAndMoonDetail() {
     var btnWrap = document.getElementById("sam-action");
@@ -412,22 +420,22 @@
 
     // Products は「何ができるか」。購入は STORE に集約。
     if (!token) {
-      btnWrap.innerHTML = '<a class="btn" href="/store/">STORE で購入する</a>' +
-        '<a class="btn secondary mt-16" href="/apps/sun-and-moon/">アプリを開く</a>';
+      btnWrap.innerHTML = '<a class="btn" href="' + appUrl("/store/") + '">STORE で購入する</a>' +
+        '<a class="btn secondary mt-16" href="' + appUrl("/apps/sun-and-moon/") + '">アプリを開く</a>';
       return;
     }
     // 権限確認
     var granted = false;
     try {
-      var res = await fetch("/api/entitlements/SUN_AND_MOON", { headers: authHeaders(token) });
+      var res = await apiFetch("/api/entitlements/SUN_AND_MOON", { headers: authHeaders(token) });
       granted = res.ok;
     } catch (e) { granted = false; }
 
     if (granted) {
-      btnWrap.innerHTML = '<a class="btn" href="/apps/sun-and-moon/">アプリを開く</a>';
+      btnWrap.innerHTML = '<a class="btn" href="' + appUrl("/apps/sun-and-moon/") + '">アプリを開く</a>';
     } else {
       // 未購入 → STORE へ誘導（購入導線は STORE に集約）
-      btnWrap.innerHTML = '<a class="btn" href="/store/">STORE で購入する</a>';
+      btnWrap.innerHTML = '<a class="btn" href="' + appUrl("/store/") + '">STORE で購入する</a>';
     }
   }
 
@@ -523,7 +531,7 @@
 
     if (btn) { btn.disabled = true; btn.textContent = "処理中…"; }
     var token = await getToken();
-    if (!token) { window.location.href = "/login/?redirect=" + encodeURIComponent("/store/"); return; }
+    if (!token) { window.location.href = appUrl("/login/") + "?redirect=" + encodeURIComponent(appUrl("/store/")); return; }
 
     // 送信前の pending を退避（RESTART_CONFIRM で「戻る」を選んだ場合に復元し、
     // まだ attempt が作られていない新 operationId を pending に残さないため）。
@@ -532,7 +540,7 @@
     try {
       var payload = { productCodes: codes, operationId: opId };
       if (restart) payload.restart = true;
-      var res = await fetch("/api/purchases/checkout", {
+      var res = await apiFetch("/api/purchases/checkout", {
         method: "POST",
         headers: Object.assign({ "Content-Type": "application/json" }, authHeaders(token)),
         body: JSON.stringify(payload),
@@ -642,9 +650,9 @@
     if (!pending || !pending.operationId) return;
     if (btn) { btn.disabled = true; btn.textContent = "取消中…"; }
     var token = await getToken();
-    if (!token) { window.location.href = "/login/?redirect=" + encodeURIComponent("/store/"); return; }
+    if (!token) { window.location.href = appUrl("/login/") + "?redirect=" + encodeURIComponent(appUrl("/store/")); return; }
     try {
-      var res = await fetch("/api/purchases/cancel", {
+      var res = await apiFetch("/api/purchases/cancel", {
         method: "POST",
         headers: Object.assign({ "Content-Type": "application/json" }, authHeaders(token)),
         body: JSON.stringify({ operationId: pending.operationId }),
@@ -702,7 +710,7 @@
     var grantedSet = {};
     if (token) {
       try {
-        var res = await fetch("/api/account/products", { headers: authHeaders(token) });
+        var res = await apiFetch("/api/account/products", { headers: authHeaders(token) });
         if (res.ok) {
           var body = await res.json();
           ((body.data && body.data.products) || []).forEach(function (p) { if (p.granted) grantedSet[p.code] = true; });
@@ -716,7 +724,7 @@
     var acConfirmed = false; // サーバーが正常応答し「再開可能状態」を確定できたか
     if (token) {
       try {
-        var acRes = await fetch("/api/purchases/active-checkout", { headers: authHeaders(token) });
+        var acRes = await apiFetch("/api/purchases/active-checkout", { headers: authHeaders(token) });
         if (acRes.ok) {
           var acBody = await acRes.json();
           if (acBody && acBody.result === "OK" && acBody.data) {
@@ -761,7 +769,7 @@
       '<div class="store-summary">' +
         '<div class="ss-total">合計: <span id="store-total">¥0</span></div>' +
         '<button class="btn" id="store-buy" disabled>選択した商品を購入</button>' +
-        '<p class="store-agree">購入手続きを進めることで、<a href="/terms/" target="_blank" rel="noopener">利用規約</a>に同意したものとします。</p>' +
+        '<p class="store-agree">購入手続きを進めることで、<a href="' + appUrl("/terms/") + '" target="_blank" rel="noopener">利用規約</a>に同意したものとします。</p>' +
       '</div>';
 
     // 進行中バナーのイベント
@@ -803,7 +811,7 @@
         if (codes.length === 0) return;
         // 未ログインで購入操作 → ログインへ誘導し、成功後 STORE へ戻す（購入時のみ認証必須）。
         if (!token) {
-          window.location.href = "/login/?redirect=" + encodeURIComponent("/store/");
+          window.location.href = appUrl("/login/") + "?redirect=" + encodeURIComponent(appUrl("/store/"));
           return;
         }
         // 保険: 購入不可（準備中・非対応販売方式）商品が万一混ざっていたら購入へ進めない。
@@ -825,7 +833,7 @@
         if (buyBtn) { buyBtn.disabled = true; buyBtn.textContent = "確認中…"; }
         var depOk = false;
         try {
-          var depRes = await fetch("/api/purchases/precheck-dependency", {
+          var depRes = await apiFetch("/api/purchases/precheck-dependency", {
             method: "POST",
             headers: Object.assign({ "Content-Type": "application/json" }, authHeaders(token)),
             body: JSON.stringify({ productCodes: codes }),
@@ -839,7 +847,7 @@
             if (depRes.status === 409 && depCode === "DEPENDENCY_REQUIRED") {
               await notify(dependencyMessage(depBody && depBody.error && depBody.error.details));
             } else if (depRes.status === 401) {
-              window.location.href = "/login/?redirect=" + encodeURIComponent("/store/");
+              window.location.href = appUrl("/login/") + "?redirect=" + encodeURIComponent(appUrl("/store/"));
               return;
             } else {
               // その他は購入内容確認モーダルへ進める（最終判定はサーバーの checkout が行う）。
@@ -908,8 +916,9 @@
     if (granted) {
       // 購入済み: バッジ＋（APP があれば）利用する導線。再購入させない。
       // （既存購入者は販売停止の影響を受けず、利用権はそのまま表示する）
-      var useHtml = meta.appUrl
-        ? '<a class="btn btn-sm sr-use" href="' + esc(meta.appUrl) + '" target="_blank" rel="noopener noreferrer">利用する</a>'
+      var useLh = launchHref(meta);
+      var useHtml = useLh
+        ? '<a class="btn btn-sm sr-use" href="' + esc(useLh) + '" target="_blank" rel="noopener noreferrer">利用する</a>'
         : '';
       cta = '<span class="badge badge-owned">購入済み</span>' + useHtml;
     } else if (!onSale) {
@@ -1137,7 +1146,7 @@
         homeGranted = {};
         if (!token) return;
         try {
-          var res = await fetch("/api/account/products", { headers: authHeaders(token) });
+          var res = await apiFetch("/api/account/products", { headers: authHeaders(token) });
           if (res.ok) {
             var body = await res.json();
             ((body.data && body.data.products) || []).forEach(function (p) {

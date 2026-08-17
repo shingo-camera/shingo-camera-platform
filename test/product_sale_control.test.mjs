@@ -249,7 +249,7 @@ const indexTs = readFileSync("src/index.ts", "utf8");
 const siteConfig = readFileSync("public/assets/site-config.js", "utf8");
 
 test("[sale] 要件G: STORE UI は purchaseEnabled かつ ONE_TIME のみ購入可能（SUBSCRIPTION は準備中）", () => {
-  assert.match(siteJs, /fetch\("\/api\/products"\)/);
+  assert.match(siteJs, /apiFetch\("\/api\/products"\)/);
   // 購入可能条件に saleType===ONE_TIME を含める（SUBSCRIPTION は購入不可）
   assert.match(siteJs, /meta\.purchaseEnabled === true && meta\.saleType === "ONE_TIME"/);
   // 取得失敗を安全側に倒す（saleInfoLoaded=false → saleLoadFailed）

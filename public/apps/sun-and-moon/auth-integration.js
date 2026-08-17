@@ -45,7 +45,7 @@
   function getClient() {
     if (clientPromise) return clientPromise;
     clientPromise = (async function () {
-      var res = await fetch("/api/config", { headers: { "X-Device-Id": deviceId } });
+      var res = await apiFetch("/api/config", { headers: { "X-Device-Id": deviceId } });
       if (!res.ok) return null;
       var body = await res.json();
       if (!self.supabase || !self.supabase.createClient) return null;
@@ -79,7 +79,7 @@
     headers["X-Device-Id"] = deviceId;
     if (token) headers["Authorization"] = "Bearer " + token;
     var opt = Object.assign({}, options, { headers: headers });
-    return fetch(url, opt);
+    return apiFetch(url, opt);
   }
 
   /**
@@ -91,12 +91,12 @@
     if (!token) {
       // 未ログイン → ログインへ（戻り先を付ける）。
       var back = encodeURIComponent(window.location.pathname + window.location.search);
-      window.location.href = LOGIN_URL + "?redirect=" + back;
+      window.location.href = appUrl(LOGIN_URL) + "?redirect=" + back;
       return false;
     }
     var res;
     try {
-      res = await fetch(API_BASE + "app-start", {
+      res = await apiFetch(API_BASE + "app-start", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Device-Id": deviceId, "Authorization": "Bearer " + token },
       });
@@ -106,12 +106,12 @@
     }
     if (res.status === 401) {
       var back2 = encodeURIComponent(window.location.pathname + window.location.search);
-      window.location.href = LOGIN_URL + "?redirect=" + back2;
+      window.location.href = appUrl(LOGIN_URL) + "?redirect=" + back2;
       return false;
     }
     if (res.status === 403) {
       // 権限なし（未購入/停止/期限切れ等）→ 商品詳細ページへ誘導。
-      window.location.href = NO_ENTITLEMENT_URL;
+      window.location.href = appUrl(NO_ENTITLEMENT_URL);
       return false;
     }
     // 管理者フラグの受け取り（表示制御用）。判定正本はサーバー（app-start の isAdmin =
@@ -146,7 +146,7 @@
     try {
       var token = await getToken();
       if (!token) return; // 未ログインなら送らない（サーバも requireProduct で拒否する）。
-      await fetch(API_BASE + "heartbeat", {
+      await apiFetch(API_BASE + "heartbeat", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Device-Id": deviceId, "Authorization": "Bearer " + token },
         keepalive: false,

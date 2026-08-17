@@ -78,10 +78,15 @@ function isValidCode(v: unknown): v is string {
 }
 
 /**
- * Stripe success_url/cancel_url の生成に使う固定オリジンを解決する。
+ * Stripe success_url/cancel_url の生成に使う固定の基底 URL を解決する。
  * request.url.origin は使わない（同一 operation の retry で origin が揺れると Stripe create
- * パラメータが変わり、idempotency 前提が崩れるため）。APP_BASE_URL を正本とし、
+ * パラメータが変わり、idempotency 前提が崩れるため）。env.APP_BASE_URL を唯一の正とし、
  * 未設定・不正なら Checkout を開始しない（壊れた URL の Session を作らない）。
+ *
+ * origin だけでなく **パスも保持**する（DEV の APP_BASE_URL="https://.../dev" の /dev を落とさない）。
+ * 末尾スラッシュは除去（付与側が "/purchase/..." を足すため）。
+ *   Production: "https://shingo-camera.com"      → "https://shingo-camera.com"
+ *   DEV:        "https://shingo-camera.com/dev"  → "https://shingo-camera.com/dev"
  */
 export function resolveBaseUrl(env: Env): string {
   const raw = env.APP_BASE_URL;
@@ -97,8 +102,8 @@ export function resolveBaseUrl(env: Env): string {
   if (u.protocol !== "https:" && u.protocol !== "http:") {
     throw new AppError("INTERNAL_ERROR", "処理中にエラーが発生しました。", 500);
   }
-  // 末尾スラッシュを除去した origin ベース（パスは付与側で組む）
-  return u.origin;
+  // origin + パス（末尾スラッシュ除去）。DEV の /dev を保持し、付与側で "/purchase/..." を組む。
+  return (u.origin + u.pathname).replace(/\/+$/, "");
 }
 
 /**

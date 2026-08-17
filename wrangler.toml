@@ -2,8 +2,10 @@
 #
 # Cloudflare Workers 設定（WORK-001 共通基盤）
 #
-# 環境方針: Local と Production（非公開）のみ。専用 Staging は作らない。
-#   設計根拠: ADR-011_LOCAL_AND_PRODUCTION_ONLY.md
+# 環境方針: Local / DEV / Production の 3 環境（ADR-012_DEV_ENVIRONMENT が ADR-011 を supersede）。
+#   - Production: top-level 設定（main → Production Worker → https://shingo-camera.com/*）。本セクションは不変。
+#   - DEV: 末尾の [env.dev]（develop → DEV Worker → https://shingo-camera.com/dev/*）。
+#   旧: ADR-011_LOCAL_AND_PRODUCTION_ONLY（Local/Production のみ）は ADR-012 で更新済み（記録は残す）。
 #
 # 非公開の維持方法:
 #   workers.dev の標準ドメインで到達可能にし、公開用カスタムドメインは
@@ -103,3 +105,65 @@ migrations_dir = "migrations"
 # database_id には影響しない（本セクションの追加のみ）。
 [triggers]
 crons = ["0 * * * *"]
+
+# ============================================================================
+# DEV 環境（[env.dev]）— WORK: 正式 DEV 環境（ADR-012）
+# ----------------------------------------------------------------------------
+# 重要:
+#   - このセクションは `wrangler deploy --env dev` の時だけ使う。top-level（Production）は不変。
+#   - Production 経路（custom domain / D1 / Route / main の自動 deploy）は一切変更しない。
+#   - env は top-level を継承しないため、DEV に必要な binding/vars/route/assets を明示する。
+#   - DEV binding/secret 不足時は Production へ fallback せず fail-closed（コード側 shim も同様）。
+#
+# 人間手順（Claude は実行しない）:
+#   1) DEV D1 作成: `wrangler d1 create shingo-camera-platform-dev` → 出力 id を下の database_id へ。
+#   2) DEV Secrets: `wrangler secret put STRIPE_SECRET_KEY --env dev`（sk_test_...）等（DEV_SECRETS.md）。
+#   3) Route `shingo-camera.com/dev/*` を DEV Worker へ（Cloudflare Dashboard / 下記 routes）。
+#   4) Cloudflare Access で `shingo-camera.com/dev/*` を メール allowlist 保護。
+#   5) Workers Builds: develop branch → `wrangler deploy --env dev`。
+[env.dev]
+name = "shingo-camera-platform-dev"
+
+# /dev/* だけを DEV Worker が受ける。Production の custom domain は変更しない（Route が優先）。
+# zone_name はカスタムドメインのゾーン。実ゾーン名に合わせること。
+routes = [
+  { pattern = "shingo-camera.com/dev/*", zone_name = "shingo-camera.com" }
+]
+
+# DEV Worker は /dev/* を Worker 先行処理（shim が prefix 除去・ASSETS 配信・noindex 付与）。
+[env.dev.assets]
+directory = "./public"
+binding = "ASSETS"                     # 非 API を public/ から配信するため Worker から明示取得する
+run_worker_first = ["/dev/*"]
+html_handling = "auto-trailing-slash"
+not_found_handling = "none"
+
+[env.dev.observability]
+enabled = true
+
+# DEV 用 通常変数（非秘密）。DEV_BASE_PATH の存在が shim を有効化する（Production には無い）。
+[env.dev.vars]
+APP_ENV = "development"
+DEV_BASE_PATH = "/dev"
+APP_BASE_URL = "https://shingo-camera.com/dev"
+# Cloudflare Access（Zero Trust）JWT の Worker 側本検証用（非秘密の識別子）。人間手順で実値へ置換。
+#   DEV_ACCESS_TEAM_DOMAIN: 例 "myteam"（→ https://myteam.cloudflareaccess.com が issuer）。
+#   DEV_ACCESS_AUD: Access Application の Audience(AUD) タグ。
+DEV_ACCESS_TEAM_DOMAIN = "frosty-paper-99da"
+DEV_ACCESS_AUD = "d8befeef5f9dd40ea1112fc4e817498d45071e8aa064414991ffedc5770a1430"
+
+# DEV 専用 D1（Production D1 と完全分離）。database_id は human 手順 1) で作成し置換する。
+#   ※ Production の database_id（52a29812-...）は絶対に流用しない。
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "shingo-camera-platform-dev"
+database_id = "bb13ba2a-5d3a-4aa7-86ae-c44904cd5102"   # ← wrangler d1 create の出力で置換
+migrations_dir = "migrations"
+
+# DEV では Warning cron は動かさない（Production 通知系へ影響させない）。必要になれば別途追加する。
+# Secrets（STRIPE_SECRET_KEY=sk_test / STRIPE_WEBHOOK_SECRET=Test / SUPABASE_* / SESSION_ID_HASH_SECRET 等）は
+#   `wrangler secret put <NAME> --env dev` で DEV Worker にのみ登録する（Git/toml に書かない）。
+
+# DEVではProductionのWarning cronを実行しない。
+[env.dev.triggers]
+crons = []

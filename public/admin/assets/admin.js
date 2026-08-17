@@ -36,7 +36,7 @@
 
   async function getClient() {
     if (_client) return _client;
-    var res = await fetch("/api/config", { headers: { "X-Device-Id": _deviceId } });
+    var res = await apiFetch("/api/config", { headers: { "X-Device-Id": _deviceId } });
     if (!res.ok) throw new Error("config fetch failed");
     var body = await res.json();
     if (!self.supabase || !self.supabase.createClient) {
@@ -52,7 +52,7 @@
     var s = await client.auth.getSession();
     var session = s && s.data ? s.data.session : null;
     if (!session) {
-      location.href = "/login/";
+      location.href = appUrl("/login/");
       return null;
     }
     return session.access_token;
@@ -62,7 +62,7 @@
   async function apiGet(path) {
     var token = await getToken();
     if (!token) return null;
-    var res = await fetch(path, {
+    var res = await apiFetch(path, {
       headers: { Authorization: "Bearer " + token, "X-Device-Id": _deviceId },
     });
     return handleRes(res);
@@ -70,7 +70,7 @@
   async function apiPut(path, bodyObj) {
     var token = await getToken();
     if (!token) return null;
-    var res = await fetch(path, {
+    var res = await apiFetch(path, {
       method: "PUT",
       headers: {
         Authorization: "Bearer " + token,
@@ -92,7 +92,7 @@
       throw new Error("この操作を行う権限がありません。");
     }
     if (res.status === 401) {
-      location.href = "/login/";
+      location.href = appUrl("/login/");
       throw new Error("ログインが必要です。");
     }
     if (!res.ok || !body || body.result !== "OK") {

@@ -12,6 +12,7 @@
   <meta http-equiv="refresh" content="0; url=/support/" />
   <title>お問い合わせ — shingo_camera LABO</title>
   <link rel="stylesheet" href="/assets/site.css" />
+  <script src="/assets/api-base.js"></script>
   <script src="/assets/vendor/supabase.js"></script>
   <script src="/assets/site-config.js"></script>
   <script src="/assets/site.js" defer></script>
@@ -31,7 +32,7 @@
   <footer id="site-footer" class="site-footer"></footer>
   <script>
     // JS 有効時は即時に /support/ へ遷移（meta refresh のフォールバック併用）。
-    try { window.location.replace("/support/"); } catch (e) { window.location.href = "/support/"; }
+    try { window.location.replace(appUrl("/support/")); } catch (e) { window.location.href = appUrl("/support/"); }
   </script>
 </body>
 </html>

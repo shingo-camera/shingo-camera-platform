@@ -12,13 +12,16 @@ import {
 } from "./_bundle/purchase_logic.mjs";
 
 /* ============================================================
- * 1/2. 環境ガード（deny-by-default: local/test のみ許可）
+ * 1/2. 環境ガード（deny-by-default: local/test/development のみ許可）
  * ============================================================ */
 test("isResetAllowedEnv: local → 許可", () => {
   assert.equal(isResetAllowedEnv({ APP_ENV: "local" }), true);
 });
 test("isResetAllowedEnv: test → 許可", () => {
   assert.equal(isResetAllowedEnv({ APP_ENV: "test" }), true);
+});
+test("isResetAllowedEnv: development（正式DEV）→ 許可", () => {
+  assert.equal(isResetAllowedEnv({ APP_ENV: "development" }), true);
 });
 test("isResetAllowedEnv: production → 拒否", () => {
   assert.equal(isResetAllowedEnv({ APP_ENV: "production" }), false);

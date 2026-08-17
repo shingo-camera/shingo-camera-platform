@@ -24,6 +24,7 @@
   <div id="detail"></div>
 </main>
 
+<script src="/assets/api-base.js"></script>
 <script src="/admin/assets/vendor/supabase.js"></script>
 <script src="/admin/assets/admin.js"></script>
 <script>
@@ -42,7 +43,7 @@
 
   var productList = [];
   try {
-    var pr = await fetch("/api/products");
+    var pr = await apiFetch("/api/products");
     var pb = await pr.json();
     if (pb && pb.result === "OK") productList = pb.data.products || [];
   } catch (e) { /* continue */ }

@@ -51,7 +51,7 @@
 
   async function getClient() {
     if (_client) return _client;
-    var res = await fetch("/api/config", { headers: { "X-Device-Id": _deviceId } });
+    var res = await apiFetch("/api/config", { headers: { "X-Device-Id": _deviceId } });
     if (!res.ok) throw new Error("config fetch failed");
     var body = await res.json();
     if (!body || body.result !== "OK" || !body.data) throw new Error("config invalid");
@@ -72,7 +72,7 @@
   // ---- M_USER 同期（ログイン後の最小呼び出し）----
   async function syncAccount(accessToken) {
     try {
-      await fetch("/api/account/sync", {
+      await apiFetch("/api/account/sync", {
         method: "POST",
         headers: {
           "Authorization": "Bearer " + accessToken,
@@ -106,7 +106,7 @@
         // メール認証後は LOGIN へ戻り、そこで redirect が再評価される。redirect なしは
         // LOGIN 側の既定で MY PAGE へ（§10B）。外部 URL は safeRedirectPath が弾く。
         var dest = safeRedirectPath();
-        var redirectTo = window.location.origin + "/login/" +
+        var redirectTo = window.location.origin + appUrl("/login/") +
           (dest ? "?redirect=" + encodeURIComponent(dest) : "");
         var r = await client.auth.signUp({
           email: email.value,
@@ -153,8 +153,8 @@
     (function () {
       var dest = safeRedirectPath();
       if (!dest) return;
-      document.querySelectorAll('a[href="/signup/"]').forEach(function (a) {
-        a.href = "/signup/?redirect=" + encodeURIComponent(dest);
+      document.querySelectorAll('a[href="' + appUrl("/signup/") + '"]').forEach(function (a) {
+        a.href = appUrl("/signup/") + "?redirect=" + encodeURIComponent(dest);
       });
     })();
 
@@ -167,7 +167,7 @@
         if (s.data && s.data.session) {
           await syncAccount(s.data.session.access_token);
           var dest = safeRedirectPath();
-          window.location.href = dest || "/mypage/";
+          window.location.href = dest || appUrl("/mypage/");
         }
       } catch (e) { /* 未ログインは正常 */ }
     })();
@@ -189,7 +189,7 @@
           await syncAccount(r.data.session.access_token);
           // LOGIN は中継地点（§7）: redirect ありは元の目的地へ、なしは MY PAGE へ。
           var dest = safeRedirectPath();
-          window.location.href = dest || "/mypage/";
+          window.location.href = dest || appUrl("/mypage/");
         }
       } catch (e) {
         setMsg(msg, "ログイン処理でエラーが発生しました。", "err");
@@ -243,7 +243,7 @@
       btn.disabled = true;
       try {
         var client = await getClient();
-        var redirectTo = window.location.origin + "/reset-password/";
+        var redirectTo = window.location.origin + appUrl("/reset-password/");
         await client.auth.resetPasswordForEmail(email.value, { redirectTo: redirectTo });
         // AUTH.md 11: 存在有無を推測されにくくするため結果文言を統一
         setMsg(msg, "入力されたメールアドレスが登録済みの場合、再設定メールを送信しました。", "ok");

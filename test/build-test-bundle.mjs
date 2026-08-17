@@ -83,3 +83,48 @@ await esbuild.build({
 });
 
 console.log("[test] built test/_bundle/support_validate.mjs");
+
+// DEV shim 純関数（依存なし）をバンドル（test/dev_env.test.mjs 用）
+const devEntry = resolve(outDir, "_dev_prefix_entry.ts");
+writeFileSync(
+  devEntry,
+  `export { stripDevPrefix, devPrefixAttr } from "../../src/shared/dev_prefix";\n`,
+);
+await esbuild.build({
+  entryPoints: [devEntry],
+  bundle: true,
+  format: "esm",
+  platform: "neutral",
+  outfile: resolve(outDir, "dev_prefix.mjs"),
+  logLevel: "silent",
+});
+console.log("[test] built test/_bundle/dev_prefix.mjs");
+
+// DEV Access 認証境界（dev_access.ts）をバンドル（jose は external）
+const devAccessEntry = resolve(outDir, "_dev_access_entry.ts");
+writeFileSync(
+  devAccessEntry,
+  `export { isDevWebhookExempt, devAccessIssuer, verifyDevAccessEmail, resolveDevAccessEmail } from "../../src/shared/dev_access";\n`,
+);
+await esbuild.build({
+  entryPoints: [devAccessEntry],
+  bundle: true, format: "esm", platform: "node",
+  external: ["jose"],
+  outfile: resolve(outDir, "dev_access.mjs"),
+  logLevel: "silent",
+});
+console.log("[test] built test/_bundle/dev_access.mjs");
+
+// DEV レスポンス変換（dev_html.ts）をバンドル（HTMLRewriter はランタイム global＝external 不要）
+const devHtmlEntry = resolve(outDir, "_dev_html_entry.ts");
+writeFileSync(
+  devHtmlEntry,
+  `export { withNoindex, finalizeDevResponse, transformDevHtml } from "../../src/shared/dev_html";\n`,
+);
+await esbuild.build({
+  entryPoints: [devHtmlEntry],
+  bundle: true, format: "esm", platform: "neutral",
+  outfile: resolve(outDir, "dev_html.mjs"),
+  logLevel: "silent",
+});
+console.log("[test] built test/_bundle/dev_html.mjs");

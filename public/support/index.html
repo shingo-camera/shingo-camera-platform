@@ -11,6 +11,7 @@
   <meta name="robots" content="noindex" />
   <title>Support — shingo_camera LABO</title>
   <link rel="stylesheet" href="/assets/site.css" />
+  <script src="/assets/api-base.js"></script>
   <script src="/assets/vendor/supabase.js"></script>
   <script src="/assets/site-config.js"></script>
   <script src="/assets/site.js" defer></script>
@@ -128,8 +129,8 @@
 
     // ログイン後に /support/ へ戻す redirect を付与
     var redir = encodeURIComponent("/support/");
-    if (loginA) loginA.href = "/login/?redirect=" + redir;
-    if (signupA) signupA.href = "/signup/?redirect=" + redir;
+    if (loginA) loginA.href = appUrl("/login/") + "?redirect=" + redir;
+    if (signupA) signupA.href = appUrl("/signup/") + "?redirect=" + redir;
 
     function setStatus(msg, kind) {
       statusEl.textContent = msg;
@@ -197,7 +198,7 @@
       setStatus("送信しています…", "");
 
       try {
-        var res = await fetch("/api/support/contact", {
+        var res = await apiFetch("/api/support/contact", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

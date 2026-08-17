@@ -24,11 +24,15 @@ import type { Env } from "../index";
 
 /**
  * 本機能を実行してよい環境か（deny-by-default）。
- * 購入履歴を削除する破壊的な Local/Test 専用 API のため、許可する環境だけを明示 whitelist する。
- * APP_ENV が local / test のときのみ true。production / 未設定 / 空文字 / 未知値 / typo は全て false。
+ * 購入履歴を削除する破壊的な Local/Test/DEV 専用 API のため、許可する環境だけを明示 whitelist する。
+ * APP_ENV が local / test / development のときのみ true。production / 未設定 / 空文字 / 未知値 / typo は全て false。
  */
 export function isResetAllowedEnv(env: Env): boolean {
-  return env.APP_ENV === "local" || env.APP_ENV === "test";
+  return (
+    env.APP_ENV === "local" ||
+    env.APP_ENV === "test" ||
+    env.APP_ENV === "development"
+  );
 }
 
 /** active attempt の Stripe 状態（reset 判定の入力）。 */

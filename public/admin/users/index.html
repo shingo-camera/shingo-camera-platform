@@ -39,6 +39,7 @@
   <div id="result"></div>
 </main>
 
+<script src="/assets/api-base.js"></script>
 <script src="/admin/assets/vendor/supabase.js"></script>
 <script src="/admin/assets/admin.js"></script>
 <script>
@@ -51,7 +52,7 @@
 
   // 商品プルダウンを既存の公開 API から構築（管理APIを増やさない）
   try {
-    var res = await fetch("/api/products");
+    var res = await apiFetch("/api/products");
     var body = await res.json();
     if (body && body.result === "OK") {
       (body.data.products || []).forEach(function (p) {
@@ -100,7 +101,7 @@
       tr.appendChild(A.td(u.lastLoginAt));
       tr.appendChild(A.td(u.lastAccessAt));
       var link = A.el("a", "詳細", "btn-link");
-      link.href = "/admin/users/detail.html?id=" + encodeURIComponent(u.authUserId);
+      link.href = appUrl("/admin/users/detail.html") + "?id=" + encodeURIComponent(u.authUserId);
       var cell = A.el("td"); cell.appendChild(link); tr.appendChild(cell);
       tbody.appendChild(tr);
     });

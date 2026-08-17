@@ -26,6 +26,7 @@
   <div id="result"></div>
 </main>
 
+<script src="/assets/api-base.js"></script>
 <script src="/admin/assets/vendor/supabase.js"></script>
 <script src="/admin/assets/admin.js"></script>
 <script>
@@ -35,7 +36,7 @@
   A.setLoading(result);
   try {
     // 既存の公開 API のみ使用（管理用の商品 API は追加しない）
-    var res = await fetch("/api/products");
+    var res = await apiFetch("/api/products");
     var body = await res.json();
     if (!body || body.result !== "OK") {
       throw new Error("商品情報の取得に失敗しました。");

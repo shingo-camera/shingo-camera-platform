@@ -27,6 +27,7 @@
   <div id="recent"></div>
 </main>
 
+<script src="/assets/api-base.js"></script>
 <script src="/admin/assets/vendor/supabase.js"></script>
 <script src="/admin/assets/admin.js"></script>
 <script>
@@ -74,7 +75,7 @@
       tr.appendChild(A.td(w.detectDate));
       tr.appendChild(A.td(A.label(A.maps.WARN_STATUS, w.status)));
       var link = A.el("a", "対応", "btn-link");
-      link.href = "/admin/warnings/";
+      link.href = appUrl("/admin/warnings/");
       var cell = A.el("td"); cell.appendChild(link); tr.appendChild(cell);
       tbody.appendChild(tr);
     });

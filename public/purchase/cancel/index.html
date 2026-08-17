@@ -31,6 +31,7 @@
   </div>
 </div>
 
+<script src="/assets/api-base.js"></script>
 <script src="/assets/vendor/supabase.js"></script>
 <script>
 (async function () {
@@ -80,7 +81,7 @@
   })();
 
   async function getToken() {
-    var res = await fetch("/api/config", { headers: { "X-Device-Id": deviceId } });
+    var res = await apiFetch("/api/config", { headers: { "X-Device-Id": deviceId } });
     if (!res.ok) return null;
     var body = await res.json();
     if (!self.supabase || !self.supabase.createClient) return null;
@@ -97,7 +98,7 @@
   }
 
   try {
-    var res = await fetch("/api/purchases/cancel", {
+    var res = await apiFetch("/api/purchases/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + token, "X-Device-Id": deviceId },
       body: JSON.stringify({ operationId: operationId }),

@@ -39,6 +39,7 @@
   </div>
 </div>
 
+<script src="/assets/api-base.js"></script>
 <script src="/assets/vendor/supabase.js"></script>
 <script>
 (async function () {
@@ -75,7 +76,7 @@
   })();
 
   async function getToken() {
-    var res = await fetch("/api/config", { headers: { "X-Device-Id": deviceId } });
+    var res = await apiFetch("/api/config", { headers: { "X-Device-Id": deviceId } });
     if (!res.ok) return null;
     var body = await res.json();
     if (!self.supabase || !self.supabase.createClient) return null;
@@ -91,7 +92,7 @@
     // ログイン後、同じ success URL（session_id 付き）へ戻す。既存 login redirect 機構を利用。
     var back = location.pathname + location.search;
     var a = document.createElement("a");
-    a.href = "/login/?redirect=" + encodeURIComponent(back);
+    a.href = appUrl("/login/") + "?redirect=" + encodeURIComponent(back);
     a.textContent = "ログインして購入状態を確認する";
     a.className = "login-cta";
     listEl.appendChild(a);
@@ -103,7 +104,7 @@
   // 商品名（表示用）を /api/products から取得（無ければ code 表示）
   var nameByCode = {};
   try {
-    var pres = await fetch("/api/products", { headers: { "X-Device-Id": deviceId } });
+    var pres = await apiFetch("/api/products", { headers: { "X-Device-Id": deviceId } });
     if (pres.ok) {
       var pbody = await pres.json();
       ((pbody && pbody.data && pbody.data.products) || []).forEach(function (p) { nameByCode[p.code] = p.name; });
@@ -117,7 +118,7 @@
   async function recoverOnce() {
     if (!sessionId) return { ok: false, codes: [] };
     try {
-      var res = await fetch("/api/purchases/recover", {
+      var res = await apiFetch("/api/purchases/recover", {
         method: "POST",
         headers: Object.assign({ "Content-Type": "application/json" }, authHeaders),
         body: JSON.stringify({ sessionId: sessionId }),
@@ -177,7 +178,7 @@
   // account/products の available を code→bool で引く
   async function fetchAvailableMap() {
     try {
-      var res = await fetch("/api/account/products", { headers: authHeaders });
+      var res = await apiFetch("/api/account/products", { headers: authHeaders });
       if (!res.ok) return null;
       var body = await res.json();
       var map = {};

@@ -40,6 +40,10 @@ import { handleNoteApply, handleNoteStatus } from "./routes/migrations";
 import { handleNoteImport, handleNoteList, handleNoteUpdate } from "./routes/admin_note";
 import { handleSupportContact } from "./routes/support";
 import { withErrorHandling } from "./shared/errors";
+import { stripDevPrefix } from "./shared/dev_prefix";
+import { withNoindex, finalizeDevResponse, transformDevHtml } from "./shared/dev_html";
+import { isDevWebhookExempt, resolveDevAccessEmail } from "./shared/dev_access";
+import { createRemoteJWKSet } from "jose";
 import { jsonError } from "./shared/response";
 import { runWarningJob } from "./shared/warning_job";
 import { handleSunAndMoonApi } from "./apps/sun-and-moon/router";
@@ -73,6 +77,17 @@ export interface Env {
   // 未設定なら SESSION_ID_HASH は NULL のまま（記録は継続。不正検知の補助情報が減るだけ）。
   // 実値は Cloudflare Secret / .dev.vars で設定し、Git/toml に書かない。
   SESSION_ID_HASH_SECRET?: string;
+
+  // ── DEV 環境（[env.dev] でのみ設定。Production では未設定＝以下は一切効かない no-op）──
+  // DEV Worker が /dev/* を受けるときの基底パス（例 "/dev"）。未設定なら DEV shim は完全に無効。
+  DEV_BASE_PATH?: string;
+  // Workers Static Assets バインディング（DEV Worker のみ。/dev 配下の非 API を public/ から配信するため）。
+  ASSETS?: Fetcher;
+  // Cloudflare Access（Zero Trust）JWT の Worker 側本検証用（P1-1）。不足時 fail-closed。
+  //   DEV_ACCESS_TEAM_DOMAIN: 例 "myteam" または "https://myteam.cloudflareaccess.com"（issuer）。
+  //   DEV_ACCESS_AUD: Access Application の Audience（AUD）タグ。
+  DEV_ACCESS_TEAM_DOMAIN?: string;
+  DEV_ACCESS_AUD?: string;
 }
 
 /**
@@ -95,6 +110,114 @@ function parsePathSegment(raw: string): string | null {
   // スラッシュ・制御文字・空白を含む値は拒否
   if (/[\/\\\s\u0000-\u001f]/.test(value)) return null;
   return value;
+}
+
+// ============================================================================
+// DEV 環境 shim（env-gated）
+// ----------------------------------------------------------------------------
+// [env.dev] の DEV Worker だけが env.DEV_BASE_PATH（例 "/dev"）を持つ。
+// Production はこの変数を持たないため、handleDevRequest は即 null＝完全な no-op で、
+// 既存 routing / request URL / 挙動は一切変わらない（characterization test で固定）。
+// DEV では:
+//   - Cloudflare Access が /dev/* を前段でメール allowlist 保護する（人間手順）。加えて Worker 側でも
+//     Cf-Access-Jwt-Assertion を jose で本検証する：署名・issuer(DEV_ACCESS_TEAM_DOMAIN)・
+//     audience(DEV_ACCESS_AUD)・payload.email が有効な場合のみ許可（env 不足・JWT 不正は fail-closed で 403）。
+//     ＝ Access policy ＋ Worker JWT 検証の二段。
+//   - 例外: POST /api/stripe/webhook（exact path）のみ Access 対象外とし、Stripe 署名検証を認証境界とする
+//     （machine-to-machine。前方一致では除外しない／webhook 以外は広く bypass しない）。
+//   - 先頭 DEV_BASE_PATH を除去して既存 route() へ（DEV bindings＝DEV D1/Test Stripe で実行）。
+//   - 非 API は env.ASSETS で public/ を配信。HTML はルート相対 src/href を /dev 前置に書換え（DEV が
+//     develop の静的資産を自己完結で読むため）。JS 内 "/api/..." は front の apiFetch が /dev/api へ解決する。
+//   - 全レスポンスへ X-Robots-Tag: noindex, nofollow を付与。
+// ============================================================================
+
+/** レスポンスへ noindex ヘッダ・リダイレクト /dev 前置は ./shared/dev_html に集約（テスト可能化）。 */
+
+// api-base.js（URL resolver）本体を ASSETS から一度だけ取得してキャッシュする。
+// DEV HTML の <head> 先頭へ inline 注入し、外部ファイルのロード成否に依存せず resolver を
+// 必ず・最初に定義する（fail-closed）。取得失敗時は空（inline 注入なし＝従来どおり外部ロードに委ねる）。
+let _apiBaseSrcCache: string | null = null;
+async function getApiBaseSrc(env: Env): Promise<string> {
+  if (_apiBaseSrcCache != null) return _apiBaseSrcCache;
+  try {
+    if (!env.ASSETS) return (_apiBaseSrcCache = "");
+    const r = await env.ASSETS.fetch(new Request("https://assets.internal/assets/api-base.js"));
+    _apiBaseSrcCache = r.ok ? await r.text() : "";
+  } catch {
+    _apiBaseSrcCache = "";
+  }
+  return _apiBaseSrcCache;
+}
+
+// Access JWKS を issuer 単位でキャッシュ（リクエスト毎の往復を避ける。auth.ts と同方式）。
+const _devAccessJwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+function devAccessKeys(issuer: string): ReturnType<typeof createRemoteJWKSet> {
+  let jwks = _devAccessJwksCache.get(issuer);
+  if (!jwks) {
+    jwks = createRemoteJWKSet(new URL(issuer + "/cdn-cgi/access/certs"));
+    _devAccessJwksCache.set(issuer, jwks);
+  }
+  return jwks;
+}
+
+
+
+/**
+ * DEV リクエスト処理。Production（DEV_BASE_PATH 未設定）では null を返し no-op。
+ */
+async function handleDevRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response | null> {
+  const base = env.DEV_BASE_PATH;
+  if (!base) return null; // ★ Production は完全 no-op（挙動不変）
+
+  const url = new URL(request.url);
+  const inner = stripDevPrefix(url.pathname, base);
+  if (inner === null) {
+    // DEV Worker は /dev/* 以外を受けない想定。安全側で 404（noindex 付き）。
+    return withNoindex(jsonError("NOT_FOUND", "指定されたリソースは存在しません。", 404));
+  }
+
+  // Stripe webhook（exact path・POST）だけは Cloudflare Access 対象外（machine-to-machine）。
+  // Access JWT を要求せず route() へ通し、既存 handleStripeWebhook の Stripe 署名検証を認証境界とする。
+  // それ以外の /dev/* は Access JWT（Cf-Access-Jwt-Assertion）を Worker 側でも本検証する（fail-closed）。
+  if (!isDevWebhookExempt(request.method, inner)) {
+    const email = await resolveDevAccessEmail(request, env, devAccessKeys);
+    if (!email) {
+      // Access 未通過／JWT 不正／env 不足はすべて拒否。
+      return withNoindex(jsonError("FORBIDDEN", "DEV 環境へのアクセス権がありません。", 403));
+    }
+  }
+
+  // 先頭 /dev を除去した内部リクエストを構築（クエリ・メソッド・ヘッダ・body 保持）。
+  const innerUrl = new URL(url.toString());
+  innerUrl.pathname = inner;
+  const innerReq = new Request(innerUrl.toString(), request);
+
+  if (inner === "/api" || inner.startsWith("/api/")) {
+    // DEV API：既存 route() を DEV bindings（DEV D1 / Test Stripe）で実行。
+    const res = await route(innerReq, env, ctx);
+    return finalizeDevResponse(res, base);
+  }
+
+  // 非 API：静的資産を ASSETS から配信。DEV binding 不足は fail-closed（Production へ fallback しない）。
+  if (!env.ASSETS) {
+    return withNoindex(jsonError("INTERNAL_ERROR", "DEV ASSETS binding 未設定です。", 500));
+  }
+  const assetRes = await env.ASSETS.fetch(innerReq);
+
+  // HTML は (1) <head> 先頭へ URL resolver(api-base.js) を inline 注入（外部ロード成否に依存させない＝
+  // fail-closed。apiBase/apiUrl/appUrl/apiFetch を必ず・最初に定義）、(2) ルート相対 src/href/action/poster を
+  // /dev 前置（DEV が develop の資産を自己完結で読む）に書換える。JS 内 "/api/..." は resolver が /dev/api へ解決。
+  const ctype = assetRes.headers.get("content-type") || "";
+  if (ctype.includes("text/html") && typeof HTMLRewriter !== "undefined") {
+    const apiBaseSrc = await getApiBaseSrc(env);
+    const rewritten = transformDevHtml(assetRes, base, apiBaseSrc);
+    return finalizeDevResponse(rewritten, base);
+  }
+  return finalizeDevResponse(assetRes, base);
 }
 
 /** メソッドとパスに応じてハンドラを振り分ける */
@@ -304,7 +427,12 @@ function routeAdmin(
 
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return withErrorHandling((req) => route(req, env, ctx))(request);
+    // DEV shim を先に評価。Production（DEV_BASE_PATH 未設定）は null で従来 route へ抜ける（挙動不変）。
+    return withErrorHandling(async (req) => {
+      const dev = await handleDevRequest(req, env, ctx);
+      if (dev) return dev;
+      return route(req, env, ctx);
+    })(request);
   },
   /**
    * Cloudflare Cron Trigger（1時間ごと）から呼ばれる定期処理。

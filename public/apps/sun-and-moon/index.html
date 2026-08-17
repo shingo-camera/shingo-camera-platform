@@ -5,6 +5,7 @@
 <!-- WORK-010 認証ゲート: 認証・権限確認が完了するまで本体を表示しない（未認証状態のフラッシュ防止）。
      JS実行前に同期で適用するため head 先頭に置く。既存UI・計算・API処理には触れない。 -->
 <style id="sm-auth-gate-style">html.sm-auth-gate body{visibility:hidden !important;}</style>
+<script src="/assets/api-base.js"></script>
 <script>document.documentElement.classList.add("sm-auth-gate");</script>
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-DEZY75EYLX"></script>

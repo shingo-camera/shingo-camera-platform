@@ -63,6 +63,7 @@
   <div id="pager" class="pager"></div>
 </main>
 
+<script src="/assets/api-base.js"></script>
 <script src="/admin/assets/vendor/supabase.js"></script>
 <script src="/admin/assets/admin.js"></script>
 <script>
@@ -94,7 +95,7 @@
     out.textContent = "取込中…";
     try {
       // multipart/form-data は Content-Type を手動設定せず、boundary 生成をブラウザに任せる
-      var res = await fetch("/api/admin/note/import", {
+      var res = await apiFetch("/api/admin/note/import", {
         method: "POST",
         headers: { Authorization: "Bearer " + token, "X-Device-Id": A.deviceId },
         body: fd

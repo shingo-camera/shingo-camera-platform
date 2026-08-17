@@ -172,10 +172,30 @@ test("reconcileAttemptForSession: CASE C で商品構成不一致なら回収し
 /* ============================================================
  * 9. 固定 origin: retry でも Stripe create パラメータ不変
  * ============================================================ */
-test("resolveBaseUrl: env.APP_BASE_URL の origin を返す（request 非依存）", () => {
+test("resolveBaseUrl: env.APP_BASE_URL の基底 URL を返す（request 非依存・パス保持）", () => {
+  // Production（パス無し）＝従来どおり origin のまま（末尾スラッシュ除去）
   assert.equal(resolveBaseUrl({ APP_BASE_URL: "https://platform.example.com" }), "https://platform.example.com");
   assert.equal(resolveBaseUrl({ APP_BASE_URL: "https://platform.example.com/" }), "https://platform.example.com");
   assert.equal(resolveBaseUrl({ APP_BASE_URL: "http://localhost:8787" }), "http://localhost:8787");
+  // Production 実値
+  assert.equal(resolveBaseUrl({ APP_BASE_URL: "https://shingo-camera.com" }), "https://shingo-camera.com");
+  // DEV（/dev パス）＝ /dev を保持（origin だけに潰さない）
+  assert.equal(resolveBaseUrl({ APP_BASE_URL: "https://shingo-camera.com/dev" }), "https://shingo-camera.com/dev");
+  assert.equal(resolveBaseUrl({ APP_BASE_URL: "https://shingo-camera.com/dev/" }), "https://shingo-camera.com/dev");
+});
+test("resolveBaseUrl: Checkout return URL が env 別に正しく組める（success/cancel とも脱出しない）", () => {
+  // Production: /dev 無し
+  const prod = resolveBaseUrl({ APP_BASE_URL: "https://shingo-camera.com" });
+  assert.equal(`${prod}/purchase/success/?session_id={CHECKOUT_SESSION_ID}`,
+    "https://shingo-camera.com/purchase/success/?session_id={CHECKOUT_SESSION_ID}");
+  assert.equal(`${prod}/purchase/cancel/?operation_id=op1`,
+    "https://shingo-camera.com/purchase/cancel/?operation_id=op1");
+  // DEV: success/cancel とも /dev を含む（Production root へ脱出しない）
+  const dev = resolveBaseUrl({ APP_BASE_URL: "https://shingo-camera.com/dev" });
+  assert.equal(`${dev}/purchase/success/?session_id={CHECKOUT_SESSION_ID}`,
+    "https://shingo-camera.com/dev/purchase/success/?session_id={CHECKOUT_SESSION_ID}");
+  assert.equal(`${dev}/purchase/cancel/?operation_id=op1`,
+    "https://shingo-camera.com/dev/purchase/cancel/?operation_id=op1");
 });
 test("resolveBaseUrl: 未設定・不正は throw（壊れた URL の Session を作らない）", () => {
   assert.throws(() => resolveBaseUrl({}));
