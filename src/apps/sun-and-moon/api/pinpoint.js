@@ -10,7 +10,7 @@
 // chance.js / /api/chance には状態依存しない独立エンドポイント（評価コアは共通）。
 // ============================================================
 import { searchCore, acceptMove } from './_search.js';
-import { moonAge, jst } from './_astro.js';
+import { moonAge, jstDateTime } from './_astro.js';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -40,7 +40,9 @@ function pinpointSearch(startDate, days, mode, pin, target){
       buildResult: (fd, ds, isSun, ctx) => {
         if(!acceptMove(fd, 30)) return null; // fail-closed：収束かつ≤30m（P0-4）
         const age = isSun ? null : moonAge(new Date(ds + 'T03:00:00Z'));
-        return { date: ds, time: jst(fd.dt), azDiff: fd.azDiff, moveM: fd.moveM,
+        // 表示 date/time は displayDt(=fd.dispDt) から同一Dateで生成（日跨ぎ安全）。azDiff/alt/angDiam も displayDt 由来。ts は canonical fd.dt のまま。
+        const dd = jstDateTime(fd.dispDt);
+        return { date: dd.date, time: dd.time, azDiff: fd.azDiff, moveM: fd.moveM,
           alt: fd.alt, baseAlt: ctx.baseAlt, topAlt: ctx.topAlt, distM: ctx.distM, age, ts: fd.dt,
           angDiam: fd.angDiam, isSun, tAz: ctx.tAz, targetAngDiam: ctx.targetAngDiam,
           pLat: ctx.sLat, pLng: ctx.sLng, pElev: ctx.sElev };

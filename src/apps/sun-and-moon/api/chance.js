@@ -5,7 +5,7 @@
 // 天体計算は _astro.js（共通モジュール）を使用し、ブラウザから秘匿。
 // ============================================================
 import { searchCore, acceptMove } from './_search.js';
-import { moonAge, jst } from './_astro.js';
+import { moonAge, jstDateTime } from './_astro.js';
 
 // 共通探索エンジン
 // params:
@@ -40,13 +40,16 @@ function search(params){
       // 採否は fail-closed：収束かつ moveM 閾値内のときのみ採用（NaN/Infinity/未収束は不採用, P0-4）。
       if(!acceptMove(fd, MAX_MOVE_M)) return null;
       const age = isSun ? null : moonAge(new Date(ds + 'T03:00:00Z'));
+      // 表示 date/time は displayDt(=fd.dispDt) から同一Dateで生成（日跨ぎ安全）。azDiff/alt/angDiam も displayDt 由来。
+      // ts は canonical fd.dt のまま（識別・sort・moveM検証用）。
+      const dd = jstDateTime(fd.dispDt);
       if(isPin){
-        return { date: ds, time: jst(fd.dt), azDiff: fd.azDiff, moveM: fd.moveM,
+        return { date: dd.date, time: dd.time, azDiff: fd.azDiff, moveM: fd.moveM,
           alt: fd.alt, baseAlt: ctx.baseAlt, topAlt: ctx.topAlt, distM: ctx.distM, age, ts: fd.dt.getTime(),
           angDiam: fd.angDiam, isSun, tAz: ctx.tAz, targetAngDiam: ctx.targetAngDiam,
           pLat: ctx.sLat, pLng: ctx.sLng, pElev: ctx.sElev };
       } else {
-        return { date: ds, time: jst(fd.dt), azDiff: fd.azDiff, moveM: fd.moveM,
+        return { date: dd.date, time: dd.time, azDiff: fd.azDiff, moveM: fd.moveM,
           alt: fd.alt, baseAlt: ctx.baseAlt, topAlt: ctx.topAlt, distM: ctx.distM, age, ts: fd.dt.getTime(),
           angDiam: fd.angDiam };
       }

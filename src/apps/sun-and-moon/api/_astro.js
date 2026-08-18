@@ -240,3 +240,11 @@ export function jst(d){
   if(!d) return '—';
   return new Date(d.getTime()+9*3600000).toISOString().substr(11,5);
 }
+// displayDt（表示基準時刻の Date）から、同一の Date に基づく JST の date(YYYY-MM-DD) と time(HH:MM) を生成する。
+// 丸めは呼び出し側（emitAt が canonical fd.dt を最近傍1分へ丸めて displayDt を作る）で行い、ここでは生成のみを一本化する。
+// 同一 Date から date/time を作るため、日跨ぎ・月跨ぎ・年跨ぎ（例 23:59:30→翌日00:00）も文字列操作なしで正しく整合する。
+export function jstDateTime(d){
+  if(!d) return { date: '—', time: '—' };
+  const iso = new Date(d.getTime()+9*3600000).toISOString();
+  return { date: iso.substr(0,10), time: iso.substr(11,5) };
+}
