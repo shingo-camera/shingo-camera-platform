@@ -64,7 +64,7 @@ window.SITE_CONFIG = {
         "打ち上げ位置と撮影地から構図をシミュレーション",
         "Google Earth 連携で立体的に確認",
       ],
-      appUrl: null,          // Platform 未統合
+      appUrl: "/apps/hanabi/",   // Platform 統合済み（/apps/hanabi/ で静的配信・app-start で requireProduct(HANABI)）
       code: "HANABI",
     },
     HANABI_GOOGLE_EARTH: {

@@ -49,6 +49,9 @@ import { runWarningJob } from "./shared/warning_job";
 import { handleSunAndMoonApi } from "./apps/sun-and-moon/router";
 import { handleSunAndMoonAppStart } from "./apps/sun-and-moon/app_start";
 import { handleSunAndMoonHeartbeat } from "./apps/sun-and-moon/heartbeat";
+import { handleHanabiAppStart } from "./apps/hanabi/app_start";
+import { handleHanabiEarthEntitlement } from "./apps/hanabi/earth";
+import { handleHanabiSceneSolve, handleHanabiTerrainSolve } from "./apps/hanabi/compute";
 
 /**
  * 環境変数・Secrets のバインディング型。
@@ -281,6 +284,24 @@ function route(request: Request, env: Env, ctx: ExecutionContext): Response | Pr
         res ?? jsonError("NOT_FOUND", "エンドポイントが見つかりません。", 404),
       );
     }
+  }
+
+  // HANABI（SUN AND MOON と同方式で統合。HANABI には計算 API がないため app-start と
+  // Earth 追加機能 entitlement 判定のみ。既存 requireProduct をそのまま再利用する）。
+  if (method === "POST" && pathname === "/api/apps/hanabi/app-start") {
+    return handleHanabiAppStart(request, env);
+  }
+  // HANABI Google Earth 追加機能（GEP 機能）の解放可否を返す（HANABI_GOOGLE_EARTH 判定）。
+  if (method === "GET" && pathname === "/api/apps/hanabi/earth-entitlement") {
+    return handleHanabiEarthEntitlement(request, env);
+  }
+  // HANABI 中核計算（独自 elAng/wind/号数内部param 適用の結果値）。HANABI 本体権限で保護。
+  if (method === "POST" && pathname === "/api/apps/hanabi/scene-solve") {
+    return handleHanabiSceneSolve(request, env);
+  }
+  // HANABI 地形遮蔽・稜線（phase=plan/compute）。HANABI 本体権限で保護。
+  if (method === "POST" && pathname === "/api/apps/hanabi/terrain-solve") {
+    return handleHanabiTerrainSolve(request, env);
   }
 
   // Admin（すべて requireAdmin をハンドラ内で通す）

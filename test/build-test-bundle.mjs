@@ -84,6 +84,75 @@ await esbuild.build({
 
 console.log("[test] built test/_bundle/support_validate.mjs");
 
+// ===== HANABI server core bundles（HANABI 統合で追加）=====
+// characterization test が「元 index.html から抽出した client 実装」と本モジュールの
+// 出力一致（差 0）を検証するために使う。依存なしの純関数群。
+const hanabiEntry = resolve(outDir, "_hanabi_entry.ts");
+writeFileSync(
+  hanabiEntry,
+  `export { elAng, calcWindOffset, windDriftWorld, hav, brng, azDiff, NUM_TABLE_SEED, seedNumMeta } from "../../src/apps/hanabi/core/hanabi_calc";\n`,
+);
+await esbuild.build({
+  entryPoints: [hanabiEntry],
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  outfile: resolve(outDir, "hanabi_calc.mjs"),
+  logLevel: "silent",
+});
+
+console.log("[test] built test/_bundle/hanabi_calc.mjs");
+
+// HANABI scene-solve（独自式適用の結果計算）
+const hanabiSceneEntry = resolve(outDir, "_hanabi_scene_entry.ts");
+writeFileSync(
+  hanabiSceneEntry,
+  `export { solveScene } from "../../src/apps/hanabi/core/scene";\n`,
+);
+await esbuild.build({
+  entryPoints: [hanabiSceneEntry],
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  outfile: resolve(outDir, "hanabi_scene.mjs"),
+  logLevel: "silent",
+});
+console.log("[test] built test/_bundle/hanabi_scene.mjs");
+
+// HANABI terrain-solve（サーバ完結）＋ PNG decoder
+const hanabiTerrainEntry = resolve(outDir, "_hanabi_terrain_entry.ts");
+writeFileSync(
+  hanabiTerrainEntry,
+  `export { solveTerrain, NAZIMUTHS, STEP_M, BG_MAX_KM } from "../../src/apps/hanabi/core/terrain";\n` +
+  `export { TerrainElevationProvider, lngToTileX, latToTileY } from "../../src/apps/hanabi/core/terrain_tiles";\n` +
+  `export { decodeTerrainPng, elevFromPixel, PngError } from "../../src/apps/hanabi/core/png";\n`,
+);
+await esbuild.build({
+  entryPoints: [hanabiTerrainEntry],
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  outfile: resolve(outDir, "hanabi_terrain.mjs"),
+  logLevel: "silent",
+});
+console.log("[test] built test/_bundle/hanabi_terrain.mjs");
+
+// HANABI 入力検証（validate）
+const hanabiValidateEntry = resolve(outDir, "_hanabi_validate_entry.ts");
+writeFileSync(
+  hanabiValidateEntry,
+  `export { validateSceneRequest, validateTerrainSolve, ValidationError, LIMITS } from "../../src/apps/hanabi/core/validate";\n`,
+);
+await esbuild.build({
+  entryPoints: [hanabiValidateEntry],
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  outfile: resolve(outDir, "hanabi_validate.mjs"),
+  logLevel: "silent",
+});
+console.log("[test] built test/_bundle/hanabi_validate.mjs");
+
 // DEV shim 純関数（依存なし）をバンドル（test/dev_env.test.mjs 用）
 const devEntry = resolve(outDir, "_dev_prefix_entry.ts");
 writeFileSync(
