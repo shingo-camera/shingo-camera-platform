@@ -494,10 +494,11 @@ const siteCssZ = readFileSync("public/assets/site.css", "utf8");
 const supportZ = readFileSync("public/support/index.html", "utf8");
 
 /* §7/§8: note URL は site-config が正本 */
-test("[実ファイル] noteArticles: HANABI/Earth は正式URL・SUN AND MOON は null（§7/§8）", () => {
+test("[実ファイル] noteArticles: HANABI/Earth/SUN AND MOON いずれも正式URL（§7/§8）", () => {
   assert.match(configZ, /hanabi: "https:\/\/note\.com\/shingo_camera\/n\/n1b987c9773bb"/);
   assert.match(configZ, /hanabiEarth: "https:\/\/note\.com\/shingo_camera\/n\/n1c252bd1f86a"/);
-  assert.match(configZ, /sunAndMoon: null/);
+  // SUN AND MOON 記事公開に伴いURLを設定（従来は準備中でnull）
+  assert.match(configZ, /sunAndMoon: "https:\/\/note\.com\/shingo_camera\/n\/na312aaf12877"/);
 });
 test("[実ファイル] note URL がHTML/JSへハードコード重複していない（§8）", () => {
   // site-config 以外に note.com の記事URLを直書きしない
@@ -506,10 +507,12 @@ test("[実ファイル] note URL がHTML/JSへハードコード重複してい�
 });
 
 /* §11: SUPPORT 使い方 → note 案内（data-note-link 解決） */
-test("[実ファイル] SUPPORT は HANABI/Earth の note 案内＋SAM は準備中でリンクなし（§11）", () => {
+test("[実ファイル] SUPPORT は HANABI/Earth/SUN AND MOON の note 案内（data-note-link 統一）（§11）", () => {
   assert.match(supportZ, /data-note-link="hanabi"/);
   assert.match(supportZ, /data-note-link="hanabiEarth"/);
-  assert.match(supportZ, /SUN AND MOON PLANNER の使い方記事は現在準備中です/);
+  // SUN AND MOON も HANABI 等と同じ data-note-link 機構で note 案内（記事公開に伴い準備中→リンク）
+  assert.match(supportZ, /data-note-link="sunAndMoon"/);
+  assert.doesNotMatch(supportZ, /SUN AND MOON PLANNER の使い方記事は現在準備中です/);
   // 汎用解決: href 設定・URL null は段落ごと非表示
   assert.match(siteJsZ, /querySelectorAll\("\[data-note-link\]"\)/);
   assert.match(siteJsZ, /a\.closest\("p"\)/);

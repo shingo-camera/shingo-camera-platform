@@ -3321,7 +3321,7 @@ async function downloadPortraitKmz(){
   // 視点オフセット（8方向パッド）をカメラの実方位に反映（プレビューと同じ「実際に振った」見え方）
   const targetAz=((targetAzRaw+pvAzOfs)%360+360)%360;
 
-  // ── プレビューと同じalpha_cam計算でcamTiltを求める ──
+  // ── プレビューと同じalpha_cam計算でcamTiltを求める（vaTop/vaBase算出方式=atan2 は4ef567f修正前のまま不変）──
   const CANVAS_H=800;
   function calcAlphaCam(fromElev, toTopElev, toBaseElev, distH_km, fvV_deg){
     const r=Math.PI/180;
@@ -3330,14 +3330,8 @@ async function downloadPortraitKmz(){
     const vaBase=Math.atan2(toBaseElev-fromElev, distH_km*1000)*180/Math.PI;
     const angSize=Math.max(vaTop-vaBase,0);
     const sizeRatio=Math.min(angSize/fvV_deg,1);
-    // portrait.htmlのdrawViewと同じtopRatioロジック
-    const isPL=t.silhouette==='pl';
-    const isPortrait=t.silhouette==='portrait'; // 人物対象(subjectAsTでsilhouette='portrait')相当
-    const topRatio=isPL
-      ? Math.min(0.60,Math.max(0.40,0.60-sizeRatio*0.20))
-      : isPortrait
-        ? Math.min(0.60,Math.max(0.40,0.60-sizeRatio*0.20))
-        : Math.min(0.45,Math.max(0.30,0.45-sizeRatio*0.15));
+    // topRatio のみ Preview と共通化（0.65基準）。alpha_cam の式・vaTop/vaBase・CANVAS_H は修正前のまま。
+    const topRatio=previewTopRatio(sizeRatio, t.silhouette);
     const targetTopY=CANVAS_H*(1-topRatio);
     const alpha_rad=vaTop*r-Math.atan((CANVAS_H/2-targetTopY)/f_px_V);
     return alpha_rad/r;
@@ -5235,6 +5229,16 @@ function angS(hM,dKm){return Math.atan2(hM,dKm*1000)*180/Math.PI;}
 function azDiff(a,b){let d=((b-a)+360)%360;return d>180?d-360:d;}
 function fovD(f){return 2*Math.atan(gSensor.w/(2*f))*180/Math.PI;}
 function fovV(f){return 2*Math.atan(gSensor.h/(2*f))*180/Math.PI;}
+// ── プレビュー/KMZ共通の初期 topRatio（対象上端を画面下から topRatio の位置に置く）──────────
+// 基準0.65（下から約65%）、大きく見える対象のみ sizeRatio で下限まで下げて頂点を画面内に収める。
+// Preview(drawView) と KMZ(calcAlphaCam) の双方がこれを使う。alpha_cam の式・vaTop/vaBase 算出方式は
+// 各側の既存実装（Preview=elAng+f_px_V / KMZ=atan2+CANVAS_H）をそのまま維持し、topRatio値のみ共通化する。
+function previewTopRatio(sizeRatio, silhouette){
+  const sr = Math.min(Math.max(sizeRatio, 0), 1);
+  return (silhouette === 'pl' || silhouette === 'portrait')
+    ? Math.min(0.65, Math.max(0.45, 0.65 - sr * 0.20))
+    : Math.min(0.65, Math.max(0.50, 0.65 - sr * 0.15));
+}
 const MOON=0.53;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -6172,27 +6176,13 @@ function drawView(dist,tAz,va){
   const cxTarget = cx + gnoH(azDiff(camAz, tAz));
 
   // 背景（オフセット前に描画）
-  if(sunsetMode){
-    // 夕日モード：太陽仰角に応じた夕焼けグラデーション
-    let sunAltForBg=5;
-    const _ds=document.getElementById('idate').value;
-    const _ts=document.getElementById('itime').value;
-    if(_ds&&_ts&&sLat!==null){
-      try{
-        if(_pvTimeOfsSec===0){ if(currentAstro) sunAltForBg=currentAstro.sun.alt; }
-        else { const _g=getInterpolatedTrajectory(_pvTimeOfsSec); if(_g) sunAltForBg=_g.sun.alt; } // ズームスクラブはtrajectory補間
-      }catch(e){}
-    }
-    // t=0(仰角-2°以下)→1(仰角10°以上)
-    const bt=Math.max(0,Math.min(1,(sunAltForBg+2)/12));
-    const sky=ctx.createLinearGradient(0,0,0,H);
-    sky.addColorStop(0,`rgb(${Math.round(5+bt*20)},${Math.round(10+bt*40)},${Math.round(30+bt*90)})`);
-    sky.addColorStop(0.55,`rgb(${Math.round(120-bt*50)},${Math.round(40+bt*60)},${Math.round(15+bt*80)})`);
-    sky.addColorStop(1,`rgb(${Math.round(180-bt*80)},${Math.round(60+bt*80)},${Math.round(20+bt*120)})`);
-    ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
-  } else {
-    // 月モード：太陽仰角に応じた空の色
-    let _sunAlt=-18;
+  // ── 背景の空色（太陽モード・月モード共通）──────────────────────────────
+  // 太陽高度に応じて 夜→天文薄明→ブルーアワー→夕焼け→昼 まで連続補間する SKY_TABLE を
+  // 両モードで共用する（従来は太陽モードだけ別アルゴリズムで、夜間も夕焼けが残っていた）。
+  // 月モードの見た目は従来と同一（同じテーブル・同じ3ストップ構成）。太陽/月の差は星・天体・
+  // ラベル等のモード固有処理側で表現する。
+  let _sunAlt=-18; // 取得失敗時は夜側フォールバック（月モード従来と同じ）
+  {
     const _ds2=document.getElementById('idate').value;
     const _ts2=document.getElementById('itime').value;
     if(_ds2&&_ts2&&sLat!==null){
@@ -6201,37 +6191,38 @@ function drawView(dist,tAz,va){
         else { const _g=getInterpolatedTrajectory(_pvTimeOfsSec); if(_g) _sunAlt=_g.sun.alt; } // ズームスクラブはtrajectory補間
       }catch(e){}
     }
-    // skyBrightness: 0=夜(-18°以下) 〜 1=昼(+18°以上)
-    const skyBrightness=Math.max(0,Math.min(1,(_sunAlt+18)/36));
-
-    // 空の色テーブル [仰角下限, 上空[r,g,b], 地平線[r,g,b]]
-    const SKY_TABLE=[
-      [-99, [1,2,8],    [2,5,12]   ],  // 夜
-      [-12, [1,3,8],     [8,15,40]   ],  // 天文薄明
-      [-9,  [1,4,10],    [16,25,64]  ],  // 薄暮
-      [-6,  [2,6,16],    [24,40,96]  ],  // ブルーアワーピーク
-      [-3,  [3,8,22],    [32,56,112] ],  // ブルーアワー開始
-      [-1,  [4,10,24],   [192,64,16] ],  // 日没ライン
-      [0,   [4,10,24],   [208,96,32] ],  // ゴールデンピーク
-      [3,   [5,13,32],   [176,80,32] ],  // ゴールデン開始
-      [6,   [20,60,140], [80,140,220]],  // 薄明（昼側）
-      [10,  [50,110,200],[100,170,255]],  // 昼（薄め）
-      [18,  [70,140,230],[130,195,255]],  // 昼（青空）
-    ];
-    function getSkyColors(alt){
-      const T=SKY_TABLE;
-      let lo=T[0],hi=T[0];
-      for(let i=0;i<T.length-1;i++){
-        if(alt>=T[i][0]&&alt<T[i+1][0]){lo=T[i];hi=T[i+1];break;}
-        if(alt>=T[T.length-1][0]){lo=hi=T[T.length-1];break;}
-      }
-      const t=lo===hi?1:Math.max(0,Math.min(1,(alt-lo[0])/(hi[0]-lo[0])));
-      const lp=(a,b)=>Math.round(a+(b-a)*t);
-      return{
-        top:  [lp(lo[1][0],hi[1][0]),lp(lo[1][1],hi[1][1]),lp(lo[1][2],hi[1][2])],
-        hor:  [lp(lo[2][0],hi[2][0]),lp(lo[2][1],hi[2][1]),lp(lo[2][2],hi[2][2])]
-      };
+  }
+  // skyBrightness: 0=夜(-18°以下) 〜 1=昼(+18°以上)
+  const _skyBrightness=Math.max(0,Math.min(1,(_sunAlt+18)/36));
+  // 空の色テーブル [仰角下限, 上空[r,g,b], 地平線[r,g,b]]
+  const SKY_TABLE=[
+    [-99, [1,2,8],    [2,5,12]   ],  // 夜
+    [-12, [1,3,8],     [8,15,40]   ],  // 天文薄明
+    [-9,  [1,4,10],    [16,25,64]  ],  // 薄暮
+    [-6,  [2,6,16],    [24,40,96]  ],  // ブルーアワーピーク
+    [-3,  [3,8,22],    [32,56,112] ],  // ブルーアワー開始
+    [-1,  [4,10,24],   [192,64,16] ],  // 日没ライン
+    [0,   [4,10,24],   [208,96,32] ],  // ゴールデンピーク
+    [3,   [5,13,32],   [176,80,32] ],  // ゴールデン開始
+    [6,   [20,60,140], [80,140,220]],  // 薄明（昼側）
+    [10,  [50,110,200],[100,170,255]],  // 昼（薄め）
+    [18,  [70,140,230],[130,195,255]],  // 昼（青空）
+  ];
+  function getSkyColors(alt){
+    const T=SKY_TABLE;
+    let lo=T[0],hi=T[0];
+    for(let i=0;i<T.length-1;i++){
+      if(alt>=T[i][0]&&alt<T[i+1][0]){lo=T[i];hi=T[i+1];break;}
+      if(alt>=T[T.length-1][0]){lo=hi=T[T.length-1];break;}
     }
+    const t=lo===hi?1:Math.max(0,Math.min(1,(alt-lo[0])/(hi[0]-lo[0])));
+    const lp=(a,b)=>Math.round(a+(b-a)*t);
+    return{
+      top:  [lp(lo[1][0],hi[1][0]),lp(lo[1][1],hi[1][1]),lp(lo[1][2],hi[1][2])],
+      hor:  [lp(lo[2][0],hi[2][0]),lp(lo[2][1],hi[2][1]),lp(lo[2][2],hi[2][2])]
+    };
+  }
+  {
     const sc=getSkyColors(_sunAlt);
     const sky=ctx.createLinearGradient(0,0,0,H);
     const mid=[Math.round((sc.top[0]+sc.hor[0])/2),Math.round((sc.top[1]+sc.hor[1])/2),Math.round((sc.top[2]+sc.hor[2])/2)];
@@ -6239,20 +6230,21 @@ function drawView(dist,tAz,va){
     sky.addColorStop(0.7,`rgb(${mid[0]},${mid[1]},${mid[2]})`);
     sky.addColorStop(1,  `rgb(${sc.hor[0]},${sc.hor[1]},${sc.hor[2]})`);
     ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
-
-    // 星：夜〜薄暮は表示、昼に向かって消える
-    const starAlpha=Math.max(0,Math.min(0.55,(1-skyBrightness*3)*0.55));
+  }
+  // 星：月モードのみ（夜〜薄暮は表示、昼に向かって消える）。太陽モードは従来どおり星を出さない。
+  if(!sunsetMode){
+    const starAlpha=Math.max(0,Math.min(0.55,(1-_skyBrightness*3)*0.55));
     if(starAlpha>0.01){
       ctx.fillStyle=`rgba(255,255,255,${starAlpha.toFixed(2)})`;
       for(let i=0;i<55;i++){
         ctx.beginPath();ctx.arc((i*137)%W,(i*79)%(H*.65),.5,0,6.28);ctx.fill();
       }
     }
-    // 明るさ情報をctxに付与してラベル描画で参照
-    ctx._skyBrightness=skyBrightness;
-    ctx._sunAltForSky=_sunAlt;
   }
-  // 月モードの明るさレベル（sunsetModeは常に夜想定、月モードのみ変化）
+  // 明るさ情報をctxに付与してラベル描画で参照
+  ctx._skyBrightness=_skyBrightness;
+  ctx._sunAltForSky=_sunAlt;
+  // 月モードの明るさレベル（sunsetModeはラベル用に夜想定=0で従来維持、月モードのみ変化）
   const skyBrightness = sunsetMode ? 0 : (ctx._skyBrightness||0);
   // ラベル縁取り色：暗い空→黒縁、明るい空→白縁
   const lblStroke = skyBrightness<0.3
@@ -6308,26 +6300,16 @@ function drawView(dist,tAz,va){
   // - 近距離・大きく見える → topLimit→H*0.30（画面上から30%）
   // topLimitRatio=nullの城(岐阜城・和歌山城)はこの動的計算を使用
   // topLimitRatio=固定値の城(PLの塔:0.60)は固定値を使用
-  // sizeRatio方式でtopRatioを決定:
-  //   angSize   = 対象の見かけ角サイズ（頂上〜根本の仰角差、度）
-  //   sizeRatio = angSize / fvV（縦画角に占める割合）0〜1
-  //   PLの塔: topRatio = 0.60 - sizeRatio*0.20 → clamp[0.40, 0.60]（下から40〜60%）
-  //   城:     topRatio = 0.45 - sizeRatio*0.15 → clamp[0.30, 0.45]（下から30〜45%）
-  //   topRatio: 下から何割の位置に頂上を置くか
-  //   canvas座標は上=0,下=H なので targetTopY = H*(1-topRatio)
+  // topRatio（対象上端を下から約65%に）：Preview/KMZ共通の previewTopRatio を使用（topRatio値のみ共通化）。
+  //   canvas座標は上=0,下=H なので targetTopY = H*(1-topRatio)。alpha_cam の式・上下操作 pvAltOfs の加算は
+  //   4ef567f 修正前のまま（vaTop/f_px_V/targetTopY 方式を変更しない）。
   const angSize = Math.max(vaTop - vaBase, 0);
   const sizeRatio = Math.min(angSize / fvV, 1);
-  const isPL = _ct().silhouette === 'pl';
-  const isPortrait = _ct().silhouette === 'portrait';
-  const topRatio = isPL
-    ? Math.min(0.60, Math.max(0.40, 0.60 - sizeRatio * 0.20))
-    : isPortrait
-      ? Math.min(0.60, Math.max(0.40, 0.60 - sizeRatio * 0.20))
-      : Math.min(0.45, Math.max(0.30, 0.45 - sizeRatio * 0.15));
+  const topRatio = previewTopRatio(sizeRatio, _ct().silhouette);
   const targetTopY = H * (1 - topRatio);
 
   // α_cam: 「頂点がtargetTopYに来るようにカメラを向けたときの光軸仰角」+ 視点オフセット
-  // pvAltOfsは見かけサイズ計算には影響させず、カメラの実際の向きにのみ反映する
+  // pvAltOfsは見かけサイズ計算には影響させず、カメラの実際の向きにのみ反映する（既存式のまま）。
   const alpha_cam = vaTop * r - Math.atan((H/2 - targetTopY) / f_px_V) + pvAltOfs * r;
 
   // 全仰角→Y座標変換（gnomonic、α_cam基準）
@@ -6541,7 +6523,10 @@ function drawView(dist,tAz,va){
   // 橋シルエット（PL・通天閣選択時のみ、対象・天体より奥のレイヤー）
   drawBridges(ctx, W, H, camAz, toY_cam, f_px_H, gnoH, r, sLat, sLng, sElev);
 
-  if(thTrue>1 && currentTarget()!==null){
+  // 描画ゲート：投影px高さ(thTrue)だけでなく投影px幅も見る。薄く広い形状（低い円錐台等）は高さpxが
+  // 1以下でも幅pxが大きく可視のため、高さのみの判定だと100mm等の広角で消えていた（200mm・拡大では
+  // f_px増でthTrue>1になり表示）。高さ or 幅 のどちらかが1pxを超えれば描画する。twは生px幅（クランプなし）。
+  if(currentTarget()!==null && (thTrue>1 || gnoH(angS(_ct().physW||10, dist))>1)){
     const ct=_ct();
     // 投影/画角/座標変換を1回だけ集約して共通入口へ渡す（drawView内に建物別if/elseを増やさない）
     const rctx={ctx, cxTarget, tY, bY, thTrue, ct, tAz, dist, f_px_H, r, vaTop, vaBase, toY_cam, gnoH, camAz, W, H, sunsetMode, horizon, cx, tw:Math.max(gnoH(angS(ct.physW||10, dist)),2), rs};

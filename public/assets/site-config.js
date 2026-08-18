@@ -27,7 +27,7 @@ window.SITE_CONFIG = {
   // ---- note 記事URL（商品ごとの詳しい説明・作例へ誘導）----
   // 役割分担: 詳しい説明書・使い方・作例は note 側。Platform は概要のみ。
   noteArticles: {
-    sunAndMoon: null,       // SUN AND MOON の note 記事URL（準備中。確定までリンク非表示）
+    sunAndMoon: "https://note.com/shingo_camera/n/na312aaf12877",       // SUN AND MOON PLANNER
     hanabi: "https://note.com/shingo_camera/n/n1b987c9773bb",           // HANABI PLANNER
     hanabiEarth: "https://note.com/shingo_camera/n/n1c252bd1f86a",      // HANABI Google Earth 連携
   },
