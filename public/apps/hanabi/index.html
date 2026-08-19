@@ -958,7 +958,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
     <!-- 三脚高さ -->
     <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
       <span style="font-size:11px;color:var(--sub);font-family:'Space Mono',monospace;">三脚高さ</span>
-      <span id="mob-tripod-disp" style="font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:var(--ac);">150<span style="font-size:9px;color:var(--sub);">cm</span></span>
+      <span id="mob-tripod-disp" onclick="openTripodPad()" title="タップで入力" style="font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:var(--ac);cursor:pointer;border-bottom:1px dashed var(--ac);-webkit-tap-highlight-color:transparent;">150<span style="font-size:9px;color:var(--sub);">cm</span></span>
       <button class="mob-now-btn" onclick="shiftTripod(0,true)">↺</button>
     </div>
     <div style="display:flex;gap:2px;flex-wrap:wrap;margin-bottom:10px;">
@@ -973,7 +973,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
     <!-- 標高オフセット -->
     <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
       <span style="font-size:11px;color:var(--sub);font-family:'Space Mono',monospace;">標高オフセット</span>
-      <span id="mob-elev-offset-disp" style="font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:var(--ac);">+0<span style="font-size:9px;color:var(--sub);">m</span></span>
+      <span id="mob-elev-offset-disp" onclick="openElevPad()" title="タップで入力" style="font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:var(--ac);cursor:pointer;border-bottom:1px dashed var(--ac);-webkit-tap-highlight-color:transparent;">+0<span style="font-size:9px;color:var(--sub);">m</span></span>
       <button class="mob-now-btn" onclick="shiftElevOffset(0,true)">↺</button>
     </div>
     <div style="display:flex;gap:2px;flex-wrap:wrap;margin-bottom:12px;">
@@ -1810,6 +1810,9 @@ function onMapClick(e){
 
 // 視点確定後の処理（標高取得・マーカー更新・シミュレーション起動）
 async function onViewPick(){
+  // 世代ガード: この呼び出しの世代を確定。getElev 待ち中に新しい onViewPick が来たら
+  //   _viewGen が進み、下の await 後で自分が最新でなければ continuation を捨てる（stale race 防止）。
+  const _myViewGen = ++_viewGen;
   _terrainInvalidate(); // 撮影地変更 → 進行中 terrain を無効化
   // 📌ボタンを有効化
   const pinBtn=document.getElementById('btn-pin-add'); // パネル内の保存ボタン
@@ -1840,6 +1843,11 @@ async function onViewPick(){
     zIndexOffset: 10000
   }).addTo(map);
 
+  // 移動モード中に onViewPick が走った場合（撮影地点の移動確定 commit 等）、通常 viewMarker を
+  //   地図に出すと移動用 view: マーカーと再び重なる。移動モード中は表示だけ退避しておき、
+  //   exitMoveMode で復帰させる（オブジェクト・座標・dragend は保持）。
+  if(_tubeMoving && viewMarker && map.hasLayer(viewMarker)) map.removeLayer(viewMarker);
+
   viewMarker.on('dragend', e=>{
     const ll = e.target.getLatLng();
     viewLat = ll.lat;
@@ -1847,11 +1855,26 @@ async function onViewPick(){
     onViewPick();
   });
 
-  // 国土地理院から標高取得
-  viewElev = 0;
-  try{ viewElev = await getElev(viewLat, viewLng); viewElevSource=_lastElevSource; }catch(e){ viewElevSource='none'; }
+  // UI 先行反映: 標高に依存しない水平幾何（視点↔筒場ライン・視野角ライン）は
+  //   getElev() の完了を待たずに即時描画する（drawViewLines/drawFovLines は lat/lng と筒場座標のみ・
+  //   viewElev/sElev/tripodH を参照しない＝標高非依存を実コードで確認済み）。
+  //   標高依存の表示（ラベルの E:標高・仰角）と scene/terrain/calcCamParams/layout は従来どおり await 後に確定する。
+  drawViewLines();
+  drawFovLines();
 
-  // 視点↔筒場ライン・視野角ライン描画
+  // 国土地理院から標高取得（await 中は global viewElev をまだ書き換えない＝stale 上書き防止）。
+  let _elevVal = 0, _elevSrc = 'none';
+  try{ _elevVal = await getElev(viewLat, viewLng); _elevSrc = _lastElevSource; }catch(e){ _elevSrc='none'; }
+
+  // 世代ガード: await 中に新しい onViewPick（別クリック/ドラッグ）が来ていたら、古い自分は
+  //   viewElev/marker/label/lines/calcCamParams/layout/scene へ一切反映せず破棄する。
+  //   最新の呼び出しだけが確定処理を行う。単独クリック時は _myViewGen===_viewGen なので従来どおり。
+  if(_myViewGen !== _viewGen) return;
+
+  // 最新であることが確定してから global の標高状態を書き込む（古い getElev 結果は上で捨てられる）。
+  viewElev = _elevVal; viewElevSource = _elevSrc;
+
+  // 視点↔筒場ライン・視野角ライン描画（最新筒場選択に合わせて確定再描画）
   drawViewLines();
   drawFovLines();
 
@@ -2568,6 +2591,11 @@ function enterMoveMode(){
   _moveSelected.clear();
   _moveSavedPos.clear();
   _moveMarkers = {};
+  // 通常の撮影地点マーカー（viewMarker: markerPane・zIndexOffset:10000・draggable）が
+  //   移動用 view: マーカー（zIndexOffset:1100）の真上に重なると、撮影地点のタップを奪う。
+  //   重複そのものを無くすため、移動モード中は通常 viewMarker を地図から退避する（座標・オブジェクトは保持）。
+  //   復帰は exitMoveMode（全終了経路が通る）で行う。
+  if(viewMarker && map.hasLayer(viewMarker)) map.removeLayer(viewMarker);
   setMapMode('tubeMove');
   buildMoveMarkers();
   // 確定パネルを表示
@@ -2587,6 +2615,10 @@ function exitMoveMode(commit){
   _moveMarkers = {}; _moveGhostMarkers = {}; _moveLines = {}; _moveLabelMarkers = {};
   _moveSelected.clear();
   setMapMode('none');
+  // 通常の撮影地点マーカーを復帰（enterMoveMode で退避したもの）。全終了経路（更新後の解除・
+  //   キャンセル・PC/スマホ終了・別モード遷移）が exitMoveMode を通るためここ1箇所で確実に戻す。
+  //   viewMarker は onViewPick 生成の同一オブジェクト（正しい座標を保持）。再生成はしない。
+  if(viewMarker && !map.hasLayer(viewMarker)) viewMarker.addTo(map);
   const panel = document.getElementById('move-commit-panel');
   if(panel) panel.style.display = 'none';
   // チェックボックスOFF
@@ -3946,6 +3978,7 @@ let viewLines=[];      // 視点↔筒場ライン
 let fovLines=[];       // 視野角ライン（地図上）
 let viewMarker=null;   // 視点マーカー
 let viewLat=null, viewLng=null, viewManual=false, viewElev=0; // 手動視点・標高
+let _viewGen=0; // onViewPick 世代カウンタ（getElev 待ち中に新しいクリックが来たら古い continuation を捨てる）
 // 地形プロファイル（{x:距離m, elev:標高m}の配列 or null）
 let gTerrainProfile=null;
 let gTerrainRidgeline=null; // 稜線データ：[{azDeg, maxVA}] 画角内の各方位の最大仰角
@@ -4275,6 +4308,16 @@ let _hkElevSign = 1;
 
 function hkInput(type, k){
   const buf = _hkBuf;
+  // パッドを開いた直後、最初の「値キー」（数字 or 小数点）でのみ既存値を置換する。
+  //   物理キーボード経路（keydown）だけでなく、オンスクリーンのボタンタップ経路でも同一に成立させる
+  //   （従来は keydown 側のみ実装され、スマホのタップでは 300 に続けて 1 を押すと 3001 になっていた）。
+  //   DEL/OK/SIGN/RESET 等の操作キーは対象外＝通常の部分編集は壊さない。確定値・単位・丸めは不変。
+  const _isValKey = (k && k.length===1 && ((k>='0'&&k<='9') || k==='.'));
+  if(_hkFreshOpen && _isValKey){
+    if(type==='tripod') buf.tripod='';
+    else buf.elev='';
+    _hkFreshOpen=false;
+  }
   if(type==='tripod'){
     if(k==='DEL'){ buf.tripod=buf.tripod.slice(0,-1); }
     else if(k==='OK'){
@@ -4401,6 +4444,9 @@ function closeFocalPad(){
 }
 function focalPadInput(k){
   const buf=_hkBuf;
+  // オンスクリーンのボタンタップでも「開いた直後の最初の数字で既存値を置換」を成立させる（keydown と同一）。
+  //   焦点距離は小数点を扱わないため数字キーのみ対象。DEL/OK は対象外＝部分編集を壊さない。
+  if(_hkFreshOpen && k && k.length===1 && k>='0' && k<='9'){ buf.focal=''; _hkFreshOpen=false; }
   if(k==='DEL'){buf.focal=buf.focal.slice(0,-1);}
   else if(k==='OK'){
     const n=parseInt(buf.focal,10);
