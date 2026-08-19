@@ -3709,7 +3709,11 @@ function getEffectiveTargetId(){
   const mobVal = document.getElementById('mob-sel-target')?.value || '';
   const raw = pcVal || mobVal;
   if(raw === MULTI_TARGET_VALUE){
-    return (multiTargetState && multiTargetState.main) ? multiTargetState.main : '';
+    // 複数選択の main が現存する対象を指す場合のみ有効。main が削除済み等で存在しなければ未選択扱い
+    //   （stale な main ID を effective として返さない）。正常な複数選択（main 現存）は従来どおり。
+    const mainId = (multiTargetState && multiTargetState.main) ? multiTargetState.main : '';
+    if(!mainId) return '';
+    return (db.targets.some(t=>t.id===mainId)) ? mainId : '';
   }
   return raw;
 }
@@ -3893,8 +3897,15 @@ function onTargetChange(){
     // 「複数選択」以外の値が選ばれた＝単一対象モードに戻った：内部状態をクリア
     multiTargetState = null;
   }
+  // PC/スマホの対象 select を必ず一致させる。getEffectiveTargetId() は pcVal||mobVal を返すため、
+  //   片側だけ '' にすると他方の古い対象ID が effective として残り、青丸・Google Map（対象）・編集が
+  //   stale な対象を参照してしまう。未選択（''）を含めて常に両 select を同値へ揃える（＝未選択の一元化）。
+  const mobSel = document.getElementById('mob-sel-target');
+  if(mobSel && mobSel.value !== raw){ mobSel.value = raw; csdSyncTrigger('mob-sel-target'); }
   const tid = getEffectiveTargetId();
   document.getElementById('btn-edit-target').disabled = !tid || raw===MULTI_TARGET_VALUE;
+  const mobEdit = document.getElementById('mob-btn-edit-target');
+  if(mobEdit) mobEdit.disabled = !tid || raw===MULTI_TARGET_VALUE;
   syncSimSelects();
   refreshMapMarkers();
   calcCamParams();
