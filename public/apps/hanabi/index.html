@@ -478,7 +478,14 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
 @media(max-width:767px){
   /* スマホでは Map・SV/GE/AR/Windy の個別アイコン群（#map-btns）をメニューへ集約するため非表示。
      衛星切替（Leaflet 独自コントロール）と現在地・ペースト・撮影計画は残置/メニュー化する。 */
+  /* スマホでは Map・SV/GE/AR/Windy の個別アイコン群（#map-btns）をメニューへ集約するため非表示。
+     衛星切替（#hb-ctrl-sat）と現在地・ペースト・撮影計画は残置/メニュー化する。 */
   #map-btns{ display:none !important; }
+  /* §19 実機修正: Leaflet 動的生成の地図上コントロールのうち、≡ 地図メニューへ統合したものを
+     スマホでは地図上から非表示にする（現在地=#hb-ctrl-loc・ペースト=#hb-ctrl-clip・撮影計画=#pin-btns）。
+     衛星切替（#hb-ctrl-sat）は独立ボタンとして残すため対象にしない。id/専用 group で確実に隠す。
+     ボタンは各 .leaflet-control の唯一の子なので、ボタンを display:none にすると空の wrapper は寸法を持たない。 */
+  #hb-ctrl-loc, #hb-ctrl-clip, #pin-btns{ display:none !important; }
   #hb-map-menu-btn{
     display:flex !important;
     position:absolute; right:8px; bottom:20px; z-index:1000;
@@ -1657,6 +1664,7 @@ function initMap(){
     options:{position:'topright'},
     onAdd(){
       const btn = L.DomUtil.create('button','map-ico');
+      btn.id = 'hb-ctrl-sat';
       btn.innerHTML = '🛰';
       btn.title = '衛星/地図切替';
       btn.style.background = '#1a2035'; // サイズ・形状は .map-ico に集約
