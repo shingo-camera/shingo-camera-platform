@@ -138,6 +138,19 @@
     return map[v] !== undefined ? map[v] : String(v);
   }
 
+  // 現在時刻を JST(+09:00) ISO 8601 文字列で返す（秒精度）。
+  // サーバ src/shared/datetime.ts nowIso() と同じ壁時計方式:
+  //   UTC エポックへ +9h を加算し getUTC* で各要素を取り出し、末尾を固定で +09:00 とする。
+  //   toISOString() の UTC(Z) 形式は使わない。フロント専用の別規約を作らず、
+  //   Platform 共通の JST ISO 8601(+09:00) 規約に合わせる。
+  // 例: 2026-08-05T18:00:00+09:00
+  function nowJstIso() {
+    var p2 = function (n) { return String(n).padStart(2, "0"); };
+    var jst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    return jst.getUTCFullYear() + "-" + p2(jst.getUTCMonth() + 1) + "-" + p2(jst.getUTCDate()) +
+      "T" + p2(jst.getUTCHours()) + ":" + p2(jst.getUTCMinutes()) + ":" + p2(jst.getUTCSeconds()) + "+09:00";
+  }
+
   // 公開
   self.AdminUI = {
     apiGet: apiGet,
@@ -150,6 +163,7 @@
     setError: setError,
     setLoading: setLoading,
     label: label,
+    nowJstIso: nowJstIso,
     maps: {
       USER_STATUS: USER_STATUS,
       UP_STATUS: UP_STATUS,

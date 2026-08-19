@@ -170,7 +170,11 @@
       selProduct.appendChild(opt);
     });
     var lblP = A.el("label", null, "field"); lblP.appendChild(A.el("span", "商品")); lblP.appendChild(selProduct);
-    var inStart = A.el("input"); inStart.type = "text"; inStart.placeholder = "2026-08-05T18:00:00+09:00";
+    // 開始日時は placeholder だけだと value が空になり、payload に startAt が入らず
+    //   新規付与 API（startAt 必須）で 400 になる。終了日時と同様に既定値を実値として持たせる。
+    //   既定は Platform 共通の JST ISO 8601(+09:00) 現在時刻（AdminUI.nowJstIso 経由・独自規約を作らない）。
+    //   管理者は必要ならこの値を編集できる。
+    var inStart = A.el("input"); inStart.type = "text"; inStart.placeholder = "2026-08-05T18:00:00+09:00"; inStart.value = A.nowJstIso();
     var lblS = A.el("label", null, "field"); lblS.appendChild(A.el("span", "開始日時")); lblS.appendChild(inStart);
     var inEnd = A.el("input"); inEnd.type = "text"; inEnd.value = "9999-12-31T23:59:59+09:00";
     var lblE = A.el("label", null, "field"); lblE.appendChild(A.el("span", "終了日時")); lblE.appendChild(inEnd);
