@@ -1222,7 +1222,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
     <p style="font-size:9px;color:var(--sub);margin-bottom:12px;line-height:1.6;">起動方法を選択してください。</p>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">
       <button class="pb" onclick="openGoogleEarthWeb()">🌐 Google Earth Web（ブラウザ）</button>
-      <button class="pb" onclick="onKmlDownloadClick()" style="position:relative;">
+      <button class="pb" id="btn-ge-pro-kml" onclick="onKmlDownloadClick()" style="position:relative;display:none;">
         📥 Google Earth Pro用KMLダウンロード
         <span style="font-size:8px;color:var(--sub);display:block;">視点・筒場・対象物のマーカー付き</span>
       </button>
@@ -7538,9 +7538,40 @@ function onGoogleEarthBtn(){
   if(gIsMobile){
     openGoogleEarthWeb();
   } else {
+    // PC: Earth 選択モーダルを開く。Google Earth Web（ブラウザ）は権限不要で常時表示。
+    //   Google Earth Pro 用 KML ダウンロードは追加商品 HANABI_GOOGLE_EARTH 保有時のみ表示する。
+    //   判定は既存の共通 entitlement（HBAuth.hasEarth）を再利用し、未保有/未ログイン/通信失敗は
+    //   非表示（安全側）。表示制御のみで、押下時の hasEarth() 判定・サーバ側 requireProduct は不変（二重防御）。
+    _syncGeProKmlBtn();
     openModal('modal-ge');
   }
 }
+
+// Pro 用 KML ダウンロードボタン(#btn-ge-pro-kml)の表示を Earth 権限に同期する。
+//   モーダルを開くたびに HBAuth.hasEarth()（既存の共通 entitlement 判定）を毎回再確認する。
+//   確認中は非表示 → true で表示 / false・通信失敗・認証統合不能は非表示（fail-closed）。
+//   false や通信失敗を永久キャッシュしない（reload なしに再取得できる）。これにより
+//   「HANABI のみ→Pro 非表示→Admin で Earth 付与→同一画面で再度開くと Pro 表示」や、
+//   一時的な通信失敗からの復帰が、モーダル再オープンで反映される。
+//   これは UI 表示制御のみ。押下時の hasEarth() 判定・サーバ requireProduct は不変（二重防御）。
+function _syncGeProKmlBtn(){
+  var btn = document.getElementById('btn-ge-pro-kml');
+  if(!btn) return;
+  // まず確認中として非表示に倒す（前回の表示状態を持ち越さない）。
+  btn.style.display = 'none';
+  var fn = (self.HBAuth && self.HBAuth.hasEarth) ? self.HBAuth.hasEarth : null;
+  if(!fn) return; // 認証統合が読めない異常時は非表示のまま（次回オープンで再試行）。
+  // このオープンの世代を記録し、非同期解決が返ったとき最新オープンにのみ反映する。
+  var gen = (++_geSyncGen);
+  fn().then(function(ok){
+    if(gen !== _geSyncGen) return;          // 古い解決は破棄（連続オープン時の取り違え防止）。
+    btn.style.display = ok === true ? 'block' : 'none'; // true のみ表示、false は非表示。
+  }).catch(function(){
+    if(gen !== _geSyncGen) return;
+    btn.style.display = 'none';              // 通信失敗は非表示（キャッシュしない＝次回再確認）。
+  });
+}
+let _geSyncGen = 0; // _syncGeProKmlBtn のオープン世代（stale な hasEarth 解決を破棄する）
 
 function openGoogleEarthWeb(){
   if(!_geParams) return;
