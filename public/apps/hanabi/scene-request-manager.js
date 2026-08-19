@@ -43,7 +43,34 @@
     var _clearTimeout = opts.clearTimeoutFn || (typeof clearTimeout !== "undefined" ? clearTimeout : null);
 
     var NULL_KEY = "\u0000__null__"; // payload=null を表す内部センチネル key
-    var cache = null; // { key, result }
+    var cache = null; // { key, result } 現在 key の最新結果（contract 用・従来どおり）
+    // 短期 LRU: server-authoritative な scene 結果を key 別に少数だけ保持する。
+    //   A→B→A のような操作で A を server 再計算せず再利用するための cache。
+    //   key は camera を除いた全 authoritative 入力の JSON なので、同一 key の結果は byte 一致
+    //   （Golden Master 不変）。古い state の誤利用は起きない（完全一致 key のみ hit）。
+    //   容量を絞り（既定 8）メモリ過剰を避ける。fail-closed: 失敗結果は入れない。
+    var LRU_MAX = opts.lruMax == null ? 8 : opts.lruMax;
+    var lruKeys = []; // 新しいものほど末尾（MRU）
+    var lruMap = {}; // key -> result
+    function lruGet(key) {
+      if (!Object.prototype.hasOwnProperty.call(lruMap, key)) return null;
+      // 参照されたら MRU へ
+      var i = lruKeys.indexOf(key);
+      if (i >= 0) { lruKeys.splice(i, 1); lruKeys.push(key); }
+      return lruMap[key];
+    }
+    function lruPut(key, result) {
+      if (Object.prototype.hasOwnProperty.call(lruMap, key)) {
+        var j = lruKeys.indexOf(key);
+        if (j >= 0) lruKeys.splice(j, 1);
+      }
+      lruKeys.push(key);
+      lruMap[key] = result;
+      while (lruKeys.length > LRU_MAX) {
+        var evict = lruKeys.shift();
+        delete lruMap[evict];
+      }
+    }
     var reqGen = 0; // ユーザーが要求した「現在の状態」の generation（正本）。currentKey が変わるたびに増える。
     var currentKey = null; // 最新 request が要求した key（NULL_KEY = 描画不能）。generation の対象。
     var pendingKey = null; // debounce 中の key
@@ -59,9 +86,11 @@
     function getState() {
       return state;
     }
-    // 現在 key に一致する cache 結果を返す（無ければ null）。
+    // 現在 key に一致する cache 結果を返す（無ければ短期 LRU も見る）。
+    // renderSim は resultFor(現在key) で描画するため、LRU に有れば即描画（server 不要）。
     function resultFor(key) {
-      return cache && cache.key === key ? cache.result : null;
+      if (cache && cache.key === key) return cache.result;
+      return lruGet(key);
     }
 
     function setState(s) {
@@ -123,6 +152,15 @@
         return;
       }
 
+      // 短期 LRU に同一 key の authoritative 結果があれば server 再計算せず再利用（A→B→A の A 等）。
+      // 完全一致 key のみ hit するため結果は byte 一致（Golden Master 不変）。
+      var reused = lruGet(key);
+      if (reused != null) {
+        cache = { key: key, result: reused };
+        setState("ok");
+        return;
+      }
+
       // 同一 key が既に pending（debounce 中）または inflight（計算中）→ 二重送信しない。
       if (pendingKey === key || inflightKey === key) {
         return;
@@ -157,6 +195,7 @@
             pendingKey = null;
             lastFailedKey = null; // 成功したので失敗記録をクリア
             cache = { key: key, result: result };
+            lruPut(key, result); // 短期 LRU に格納（A→B→A の再利用用）
             setState("ok");
           })
           .catch(function () {

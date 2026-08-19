@@ -472,6 +472,50 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
   box-shadow:0 2px 6px rgba(0,0,0,.5);
 }
 .map-ico:disabled{opacity:.4;cursor:default;}
+/* §19: スマホ地図補助操作の集約メニュー（SUN AND MOON 方式）。衛星切替は独立アイコンのまま。
+   PC では非表示（従来の 🗺 ポップアップ・右カラムアイコンをそのまま使う）。 */
+#hb-map-menu-btn{ display:none; }
+@media(max-width:767px){
+  /* スマホでは Map・SV/GE/AR/Windy の個別アイコン群（#map-btns）をメニューへ集約するため非表示。
+     衛星切替（Leaflet 独自コントロール）と現在地・ペースト・撮影計画は残置/メニュー化する。 */
+  #map-btns{ display:none !important; }
+  #hb-map-menu-btn{
+    display:flex !important;
+    position:absolute; right:8px; bottom:20px; z-index:1000;
+    width:34px; min-width:34px; height:34px; padding:0;
+    align-items:center; justify-content:center;
+    background:var(--sur2); border:1px solid var(--bd); color:var(--tx);
+    border-radius:7px; cursor:pointer; font-size:16px; font-weight:700;
+    box-shadow:0 2px 8px rgba(0,0,0,.5);
+    -webkit-tap-highlight-color:transparent; user-select:none;
+  }
+}
+#hb-map-menu-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:9900; display:none; }
+#hb-map-menu-overlay.open{ display:block; }
+#hb-map-menu-sheet{
+  position:fixed; left:0; right:0; bottom:0; z-index:9910;
+  background:var(--sur); border-top:1px solid var(--bd); border-radius:14px 14px 0 0;
+  transform:translateY(100%); transition:transform .25s ease;
+  max-height:72vh; overflow-y:auto; padding:0 14px 24px;
+  -webkit-overflow-scrolling:touch;
+}
+#hb-map-menu-sheet.open{ transform:translateY(0); }
+#hb-map-menu-sheet .mm-head{
+  display:flex; justify-content:space-between; align-items:center;
+  position:sticky; top:0; background:var(--sur); padding:14px 0 6px;
+}
+#hb-map-menu-sheet .mm-head span{ font-size:14px; font-weight:700; color:var(--tx); }
+.hb-map-menu-item{
+  display:flex; align-items:center; gap:10px; width:100%;
+  min-height:48px; padding:12px 14px; margin-top:8px;
+  background:var(--sur2); border:1px solid var(--bd); color:var(--tx);
+  border-radius:10px; cursor:pointer; font-size:14px; text-align:left;
+  font-family:inherit; -webkit-tap-highlight-color:transparent;
+}
+.hb-map-menu-item span{ color:var(--tx); }
+.hb-map-menu-item:disabled{ opacity:.4; cursor:default; }
+.hb-map-menu-section-title{ margin:16px 4px 4px; color:var(--sub); font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.08em; }
+.hb-map-menu-section-title.first{ margin-top:6px; }
 /* Leafletコントロールの余白を詰める（左右カラム共通で上から詰まる） */
 .leaflet-top .leaflet-control{margin-top:4px;}
 .leaflet-right .leaflet-control{margin-right:4px;}
@@ -531,7 +575,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
         </select>
       </div>
       <div class="row2" style="margin-bottom:6px;">
-
+  
         <button class="pb sm" id="btn-edit-tube" onclick="openEditTube()" disabled>✎ 編集</button>
         <button class="pb sm" onclick="openTubeVisibility()" title="筒場可視化設定">👁</button>
       </div>
@@ -643,6 +687,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
     <!-- 地図 -->
     <div id="mapbox">
       <div id="map"></div>
+      <!-- §19: スマホ用 地図メニュー（☰）。衛星切替は Leaflet 独立アイコンのまま。PC では CSS で非表示。 -->
+      <button id="hb-map-menu-btn" onclick="openHbMapMenu()" title="地図メニュー" aria-label="地図メニュー">☰</button>
       <div id="map-mode">
         <button class="mm-btn" id="mm-tube" onclick="openAddTubeFromPin()">🔴 筒場追加</button>
         <button class="mm-btn target" id="mm-target" onclick="openAddTargetFromPin()">🏢 対象物追加</button>
@@ -671,7 +717,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
         <button id="map-btn-ar" class="map-ico" onclick="onArCameraBtn()"
           style="background:#c0392b;border:none;display:none;" title="ARカメラで確認">📷</button>
         <button id="btn-windy" class="map-ico" title="Windyで風を確認" disabled>🌬️</button>
-
+      
         <!-- Map/SV統合ボタンのポップアップ（2アクション目） -->
       <div id="map-link-pop" style="display:none;position:absolute;top:0;right:34px;z-index:1002;
         flex-direction:column;gap:4px;background:rgba(10,12,20,.95);border:1px solid #3a4060;
@@ -679,7 +725,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
         <a id="map-btn-gmap" href="#" target="_blank" onclick="closeMapLinkPop()"
           style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:4px;
           background:#4285f4;color:#fff;text-decoration:none;font-size:11px;white-space:nowrap;
-          font-family:'Space Mono',monospace;">🗺 Googleマップ</a>
+          font-family:'Space Mono',monospace;">🗺 Googleマップ（撮影地点）</a>
+        <button id="map-btn-gmap-tube" type="button" onclick="_openTubeGmap()"
+          style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:4px;border:none;cursor:pointer;
+          background:#4285f4;color:#fff;font-size:11px;white-space:nowrap;
+          font-family:'Space Mono',monospace;">🗺 Googleマップ（筒場）</button>
+        <button id="map-btn-gmap-target" type="button" onclick="_openTargetGmap()"
+          style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:4px;border:none;cursor:pointer;
+          background:#4285f4;color:#fff;font-size:11px;white-space:nowrap;
+          font-family:'Space Mono',monospace;">🗺 Googleマップ（対象）</button>
         <a id="map-btn-sv" href="#" target="_blank" onclick="closeMapLinkPop()"
           style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:4px;
           background:#34a853;color:#fff;text-decoration:none;font-size:11px;white-space:nowrap;
@@ -687,7 +741,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;heigh
       </div>
       </div>
 
-
+      
     </div>
 
     <!-- プレビューパネル -->
@@ -1623,6 +1677,7 @@ function initMap(){
     options:{position:'topright'},
     onAdd(){
       const btn = L.DomUtil.create('button','map-ico');
+      btn.id = 'hb-ctrl-loc';
       btn.innerHTML = '📍';
       btn.title = '現在地に移動';
       // サイズ・形状・背景は .map-ico に集約
@@ -1656,6 +1711,7 @@ function initMap(){
     options:{position:'topright'},
     onAdd(){
       const btn = L.DomUtil.create('button','map-ico');
+      btn.id = 'hb-ctrl-clip';
       btn.innerHTML = '⬇️';
       btn.title = 'GoogleマップURL・座標をクリップボードからペースト';
       // サイズ・形状・背景は .map-ico に集約
@@ -2321,6 +2377,7 @@ function csdRefresh(selectId, opts={}){
 
 // 移動モード用
 let _tubeMoving = false;         // 移動モードフラグ
+let _viewMovedInCommit = false;  // §16: 移動確定で撮影地点を動かしたか
 let _moveSelected = new Set();   // 選択中のID（'tube:id' or 'tg:id'）
 let _moveSavedPos = new Map();   // キャンセル用の元位置 id→{lat,lng}
 let _moveTempPos = {};           // ドラッグ後の一時位置 id→{lat,lng}（buildMoveMarkersで参照）
@@ -2652,7 +2709,27 @@ function buildMoveMarkers(){
     _moveMarkers[key] = m;
   });
 
-  // ゴーストマーカー＋接続線
+  // §16: 撮影地点マーカー（SUN AND MOON と同様に移動モードで撮影地点を移動可能にする）。
+  //   撮影地点が設定されている場合のみ表示。移動確定は既存の撮影地点変更処理へ接続する。
+  if(viewLat!==null && viewLng!==null){
+    const key = 'view:';
+    const isSel = _moveSelected.has(key);
+    const baseColor = '#7eb8e8';
+    const icon = makeMoveIconWithLabel(baseColor, isSel, '', 16);
+    const initPos = _moveTempPos[key] || {lat:viewLat, lng:viewLng};
+    const m = L.marker([initPos.lat,initPos.lng],{icon, draggable:false, zIndexOffset:1100})
+      .addTo(map).bindTooltip(`📷 撮影地点`,{direction:'top'});
+    m.on('click', e=>{
+      L.DomEvent.stopPropagation(e);
+      if(_moveDragged) return;
+      if(_moveSelected.has(key)){ _moveSelected.delete(key); }
+      else { if(!_moveSavedPos.has(key)) _moveSavedPos.set(key, {lat:viewLat, lng:viewLng}); _moveSelected.add(key); }
+      buildMoveMarkers(); updateMoveStatus();
+    });
+    m.on('mousedown', e=>{ if(e.originalEvent.button===0) startMoveDrag(e, key); });
+    m.on('touchstart', e=>{ startMoveDrag(e, key); }, {passive:false});
+    _moveMarkers[key] = m;
+  }
   _moveSavedPos.forEach((pos, key)=>{
     // 元色を判定
     const baseColor = key.startsWith('tube:') ? '#e8874a' : '#7eb8e8';
@@ -2809,6 +2886,14 @@ async function commitMoveMode(){
         elevPromises.push(getElev(lat,lng).then(e=>{ tg.elev=e; }).catch(()=>{}));
         elevPromises.push(getPrefecture(lat,lng).then(pref=>{ tg.prefecture=pref; }).catch(()=>{}));
       }
+    } else if(k==='view:'){
+      // §16: 撮影地点の移動確定。既存の撮影地点変更処理と同一の状態遷移にする
+      //   （viewManual=true・ピン由来解除・地形プロファイル破棄）。標高再取得と再計算は
+      //   下の onViewPick() で通常経路と完全一致で行う（計算結果は移動元と同値）。
+      viewLat = lat; viewLng = lng; viewManual = true;
+      _currentViewPin = null;
+      gTerrainProfile = null; gTerrainRidgeline = null; gTerrainRidgelineFuji = null; gBgRidgeline = null;
+      _viewMovedInCommit = true;
     }
     // 確定済みなのでゴーストを消す・一時位置をクリア・距離ラベルを消す
     _moveSavedPos.delete(k);
@@ -2823,6 +2908,12 @@ async function commitMoveMode(){
   refreshFestivalSelects(); // prefecture更新をUIに反映
   refreshTargetSelects();
   if(typeof calcCamParams === 'function') calcCamParams(); // _geParams更新
+  // §16: 撮影地点を移動した場合は、通常の撮影地点変更と同一経路（標高取得→マーカー→再計算）を通す。
+  //   これにより移動モード経由でも計算結果は通常設定と完全一致する。
+  if(_viewMovedInCommit){
+    _viewMovedInCommit = false;
+    if(typeof onViewPick === 'function') await onViewPick();
+  }
   renderSim && renderSim();
   renderDiag && renderDiag();
 }
@@ -4617,7 +4708,13 @@ function _buildScenePayload(){
 
 // payload から安定した key を作る（同一入力→同一 key）。
 function _sceneKey(payload){
-  return payload ? JSON.stringify(payload) : null;
+  if(!payload) return null;
+  // scene-solve の結果は camera（focal/sensor/compMode/azOffset/elOffset）に依存しない
+  //（server は camera を検証するが計算には使わない。framing は client 側 toX/toY_cam で適用）。
+  // したがって camera を key から除外し、上下左右・拡大縮小・焦点距離など framing のみの操作では
+  // 計算済み scene 結果を再利用する（不要な /scene-solve を発火させない）。計算結果は不変。
+  const { camera, ...keyable } = payload;
+  return JSON.stringify(keyable);
 }
 
 // 再計算要求。マネージャへ委譲（debounce・stale 破棄・fail-closed）。
@@ -7061,16 +7158,50 @@ let _arViewLat = null, _arViewLng = null, _arViewElev = 0;
 const _isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
 const AR_HFOV = _isIOS ? 69 : 80;
 
+// §21: AR センサー許可が denied のときの復旧案内。
+//   iOS Safari は一度「許可しない」を選ぶと同一ページ表示中は再ダイアログを出さない（WebKit 仕様）。
+//   確実に有効な復旧は「ページを再読み込み → もう一度 AR → 許可」。設定手順は端末/OS 差があるため断定しない。
+function _showArSensorDeniedHelp(){
+  const msg =
+    'ARには方向センサー（モーションと画面の向き）の許可が必要です。\n\n' +
+    'iPhone / Safari では一度「許可しない」を選ぶと、このページを開いている間は許可ダイアログが再表示されません。\n\n' +
+    '復旧するには、\n' +
+    '1) このページを再読み込みする\n' +
+    '2) もう一度「AR」をタップする\n' +
+    '3) 表示される許可ダイアログで「許可」を選ぶ\n\n' +
+    '今すぐ再読み込みしますか？（編集中の内容は保存済みの範囲で保持されます）';
+  if(confirm(msg)){
+    try{ location.reload(); }catch(e){ /* noop */ }
+  }
+}
+
 async function onArCameraBtn(){
   if(!_geParams) return;
 
-  // iOSのジャイロ許可
+  // iOS のモーション/方向センサー許可（iOS 13+ Safari）。
+  // §21: 一度「許可しない」を選ぶと、Safari は同一ページ表示中は再度ダイアログを出さず、
+  //   requestPermission() は即 'denied' を返す（WebKit 仕様。ページ再読み込みで 'prompt' に戻る）。
+  //   このため denied 時は「再読み込み→もう一度 AR→許可」を案内する（設定手順は推測で書かない）。
   if(_isIOS && typeof DeviceOrientationEvent !== 'undefined' &&
      typeof DeviceOrientationEvent.requestPermission === 'function'){
+    let res = 'denied';
     try{
-      const res = await DeviceOrientationEvent.requestPermission();
-      if(res !== 'granted'){ alert('方向センサーの許可が必要です'); return; }
-    } catch(e){ console.warn(e); }
+      res = await DeviceOrientationEvent.requestPermission();
+      // 一部 iOS は DeviceMotion 側の許可も必要。granted の場合のみ続けて要求する。
+      if(res === 'granted' && typeof DeviceMotionEvent !== 'undefined' &&
+         typeof DeviceMotionEvent.requestPermission === 'function'){
+        try{ await DeviceMotionEvent.requestPermission(); }catch(e){ /* motion 側失敗は方向のみで継続 */ }
+      }
+    } catch(e){
+      // NotAllowedError（prompt 状態でユーザー操作が無い等）。ユーザー操作から呼んでいるため通常は発生しないが、
+      // 念のため denied 扱いにして下の案内へ倒す。
+      console.warn('requestPermission error', e);
+      res = 'denied';
+    }
+    if(res !== 'granted'){
+      _showArSensorDeniedHelp();
+      return;
+    }
   }
 
   // カメラ起動
@@ -8269,6 +8400,76 @@ function _mapBtnEnable(el, on){
   if(el.tagName!=='A') el.disabled = !on;
 }
 
+// §17: Googleマップ起動対象（撮影地点・筒場・対象）。SUN AND MOON の _openTargetGmap 方式を参考に、
+//   未選択時は何もしない（代替しない・エラーdialog なし）。座標はそれぞれの実座標のみ。
+function _hanabiSelectedTube(){
+  const fid = document.getElementById('sel-festival')?.value || document.getElementById('mob-sel-festival')?.value || '';
+  if(!fid) return null;
+  const selId = document.getElementById('sel-tube')?.value || document.getElementById('mob-sel-tube')?.value || '';
+  if(!selId) return null;
+  const tb = db.tubes.find(t=>t.id===selId && t.festivalId===fid);
+  return tb ? {lat:tb.lat, lng:tb.lng} : null;
+}
+function _hanabiSelectedTarget(){
+  const tid = getEffectiveTargetId();
+  if(!tid) return null;
+  const tg = db.targets.find(t=>t.id===tid);
+  return tg ? {lat:tg.lat, lng:tg.lng} : null;
+}
+function _openGmapAt(pos){
+  if(!pos || pos.lat===null || pos.lat===undefined || pos.lng===null || pos.lng===undefined) return;
+  window.open(`https://www.google.com/maps?q=${pos.lat},${pos.lng}`, '_blank', 'noopener');
+}
+// 撮影地点: 現在の撮影地点座標（未設定なら何もしない）
+// §19: スマホ地図メニュー（集約）。衛星切替は地図上の独立アイコンに残す。
+function openHbMapMenu(){
+  // 開く前に Googleマップ（筒場/対象）の有効/無効を選択状態に合わせる（未選択は押しても何もしない）。
+  const tOn = !!_hanabiSelectedTube();
+  const gOn = !!_hanabiSelectedTarget();
+  const vOn = (viewLat!==null && viewLng!==null);
+  const setEnabled=(id,on)=>{ const b=document.getElementById(id); if(b){ b.disabled=!on; b.style.opacity=on?'1':'0.4'; } };
+  setEnabled('hb-mm-gmap-view', vOn);
+  setEnabled('hb-mm-gmap-tube', tOn);
+  setEnabled('hb-mm-gmap-target', gOn);
+  setEnabled('hb-mm-sv', vOn);
+  // Windy は選択筒場がある時のみ（§20: Windy ロジックは変更しない・既存 btn-windy を利用）。
+  const wBtn=document.getElementById('btn-windy');
+  setEnabled('hb-mm-windy', !!(wBtn && !wBtn.disabled));
+  const ov=document.getElementById('hb-map-menu-overlay');
+  const sh=document.getElementById('hb-map-menu-sheet');
+  if(ov) ov.classList.add('open');
+  if(sh) sh.classList.add('open');
+}
+function closeHbMapMenu(){
+  const ov=document.getElementById('hb-map-menu-overlay');
+  const sh=document.getElementById('hb-map-menu-sheet');
+  if(ov) ov.classList.remove('open');
+  if(sh) sh.classList.remove('open');
+}
+// 既存の地図コントロール（現在地/ペースト）をメニューから起動する（第二実装を作らない）。
+function _hbLoc(){ const b=document.getElementById('hb-ctrl-loc'); if(b) b.click(); }
+function _hbClip(){ const b=document.getElementById('hb-ctrl-clip'); if(b) b.click(); }
+// 既存の href リンク（ストリートビュー）を新規タブで開く。
+function _hbOpenHref(id){ const a=document.getElementById(id); if(a && a.href && a.href!=='#'){ window.open(a.href,'_blank','noopener'); } }
+// Windy は既存 btn-windy のクリックへ委譲（§20: Windy は変更しない）。
+function _hbWindy(){ const b=document.getElementById('btn-windy'); if(b && !b.disabled) b.click(); }
+
+function _openViewGmap(){
+  const pos = (viewLat!==null && viewLng!==null) ? {lat:viewLat, lng:viewLng} : null;
+  _openGmapAt(pos);
+  if(typeof closeMapLinkPop==='function') closeMapLinkPop();
+}
+// 筒場: 現在選択中の筒場座標（未選択なら何もしない）
+function _openTubeGmap(){
+  _openGmapAt(_hanabiSelectedTube());
+  if(typeof closeMapLinkPop==='function') closeMapLinkPop();
+}
+// 対象: 現在選択中の対象座標（未選択なら何もしない）
+function _openTargetGmap(){
+  _openGmapAt(_hanabiSelectedTarget());
+  if(typeof closeMapLinkPop==='function') closeMapLinkPop();
+}
+
 function updateMapBtns(simViewLat, simViewLng, azRad){
   // PC/モバイルの排他表示は撮影地の有無と無関係に常に同期させる
   _syncGeArBtn();
@@ -8302,6 +8503,11 @@ function updateMapBtns(simViewLat, simViewLng, azRad){
   const svUrl   = `https://www.google.com/maps/@${lat},${lng},3a,${fovDeg}y,${svAzDeg.toFixed(1)}h,${tiltDeg.toFixed(1)}t/data=!3m1!1e1`;
   document.getElementById('map-btn-gmap').href = mapsUrl;
   document.getElementById('map-btn-sv').href   = svUrl;
+  // §17/§18: 筒場・対象の Googleマップは選択時のみ有効（未選択は押しても何もしない＝ここでは視覚的に無効化）。
+  const _tubeBtn = document.getElementById('map-btn-gmap-tube');
+  if(_tubeBtn){ const on = !!_hanabiSelectedTube(); _tubeBtn.disabled = !on; _tubeBtn.style.opacity = on ? '1' : '0.4'; _tubeBtn.style.cursor = on ? 'pointer' : 'not-allowed'; }
+  const _tgBtn = document.getElementById('map-btn-gmap-target');
+  if(_tgBtn){ const on = !!_hanabiSelectedTarget(); _tgBtn.disabled = !on; _tgBtn.style.opacity = on ? '1' : '0.4'; _tgBtn.style.cursor = on ? 'pointer' : 'not-allowed'; }
   // Windyボタン（選択中筒場の座標）
   const fid2 = document.getElementById('sel-festival') ? document.getElementById('sel-festival').value : '';
   const tubes2 = fid2 ? db.tubes.filter(t=>t.festivalId===fid2) : [];
@@ -8378,9 +8584,16 @@ function _applyPlan(pin){
     if(typeof csdRefresh==='function'){ try{ csdRefresh(id,{}); }catch(err){} }
     e.dispatchEvent(new Event('change'));
   };
-  if(pin.festivalId!==undefined) setSel('sel-festival', pin.festivalId);
-  if(pin.tubeId    !==undefined) setSel('sel-tube',     pin.tubeId);
-  if(pin.targetId  !==undefined) setSel('sel-target',   pin.targetId);
+  // §13/§14: 撮影計画ロード時、保存された筒場/対象が現在解決できない場合は「未選択」にする。
+  //   前の選択を残さない・別筒場/別対象へ代替しない（setSel は options に無い値を '' にする）。
+  //   計画（_isPlan）である以上、festival/tube/target は必ず解決を試みる（undefined でも '' 扱いで
+  //   前の選択をクリアする）。存在すれば従来どおり復元。
+  setSel('sel-festival', pin.festivalId || '');
+  setSel('sel-tube',     pin.tubeId    || '');
+  setSel('sel-target',   pin.targetId  || '');
+  // §15: 選択筒場に関わらず、同一花火大会に属する表示対象筒場をすべて地図へ再描画する。
+  //   （setSel の change 経路でも描画されるが、async/順序の揺れに依存せず末尾で確定的に再描画する。）
+  if(typeof refreshMapMarkers==='function') refreshMapMarkers();
   if(pin.sensorKey !==undefined && typeof setSensor==='function') setSensor(pin.sensorKey);
   if(pin.compMode  !==undefined && typeof setCompMode==='function') setCompMode(pin.compMode);
   // 代入だけでは表示・計算に反映されないため、各値の正規の更新処理を伴わせる
@@ -9291,6 +9504,27 @@ init();
     <button id="csd-mob-modal-close" onclick="csdMobModalClose()">✕</button>
   </div>
   <div id="csd-mob-modal-list"></div>
+</div>
+
+<!-- §19: スマホ用 地図メニュー（集約）。衛星切替は地図上の独立アイコンに残す。 -->
+<div id="hb-map-menu-overlay" onclick="closeHbMapMenu()"></div>
+<div id="hb-map-menu-sheet" role="dialog" aria-label="地図メニュー" aria-modal="true">
+  <div class="mm-head">
+    <span>地図メニュー</span>
+    <button onclick="closeHbMapMenu()" title="閉じる" aria-label="閉じる" style="background:none;border:none;color:var(--sub);font-size:20px;cursor:pointer;padding:0 6px;line-height:1;">✕</button>
+  </div>
+  <div class="hb-map-menu-section-title first">撮影地点</div>
+  <button class="hb-map-menu-item" onclick="_hbLoc();closeHbMapMenu();">📍 <span>現在地に移動</span></button>
+  <button class="hb-map-menu-item" onclick="_hbClip();closeHbMapMenu();">⬇️ <span>座標・URLをペースト</span></button>
+  <button class="hb-map-menu-item" onclick="openPinPanel();closeHbMapMenu();">🏷️ <span>撮影計画（保存・呼び出し）</span></button>
+  <div class="hb-map-menu-section-title">Googleマップ</div>
+  <button class="hb-map-menu-item" id="hb-mm-gmap-view" onclick="_openViewGmap();closeHbMapMenu();">🗺 <span>Googleマップ（撮影地点）</span></button>
+  <button class="hb-map-menu-item" id="hb-mm-gmap-tube" onclick="_openTubeGmap();closeHbMapMenu();">🗺 <span>Googleマップ（筒場）</span></button>
+  <button class="hb-map-menu-item" id="hb-mm-gmap-target" onclick="_openTargetGmap();closeHbMapMenu();">🗺 <span>Googleマップ（対象）</span></button>
+  <button class="hb-map-menu-item" id="hb-mm-sv" onclick="_hbOpenHref('map-btn-sv');closeHbMapMenu();">👁 <span>ストリートビュー（撮影地点→筒場）</span></button>
+  <div class="hb-map-menu-section-title">外部アプリ</div>
+  <button class="hb-map-menu-item" id="hb-mm-ar" onclick="onArCameraBtn();closeHbMapMenu();">📷 <span>ARカメラで確認</span></button>
+  <button class="hb-map-menu-item" id="hb-mm-windy" onclick="_hbWindy();closeHbMapMenu();">🌬️ <span>Windy（選択筒場の風）</span></button>
 </div>
 </body>
 </html>
