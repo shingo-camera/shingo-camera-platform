@@ -366,9 +366,13 @@
   function ownedCard(p) {
     var meta = productMeta(p.code);
     var launchUrl = launchHref(meta);
+    // 購入済み + appUrl あり → 「利用する」（別タブ）。
+    // 購入済み + appUrl なし（HANABI_GOOGLE_EARTH 等の追加権限・単体起動しない）→
+    //   HOME/STORE と同一の所有バッジ（badge-owned「購入済み」）を出す。起動導線は作らない。
+    //   （「準備中」は未提供商品向けであり、購入済み・利用可能な追加機能には使わない。）
     var action = launchUrl
       ? '<a class="btn btn-sm" href="' + esc(launchUrl) + '" target="_blank" rel="noopener noreferrer">利用する</a>'
-      : '<span class="btn disabled">準備中</span>';
+      : '<span class="badge badge-owned">購入済み</span>';
     return launchCardHtml(meta, p, action);
   }
   function availableCard(p) {
