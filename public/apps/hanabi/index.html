@@ -2869,7 +2869,7 @@ function startMoveDrag(e, key){
   document.addEventListener('touchend', onEnd);
 }
 
-// カーソルキーで移動（筒場:1m、対象のみ:0.2m）
+// カーソルキーで移動（筒場を含む:1m、対象・撮影地点のみ:0.2m）
 document.addEventListener('keydown', e=>{
   if(!_tubeMoving || _moveSelected.size===0) return;
   if(!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
@@ -2878,9 +2878,10 @@ document.addEventListener('keydown', e=>{
   let avgLat = 0;
   _moveSelected.forEach(k=>{ const m=_moveMarkers[k]; if(m) avgLat+=m.getLatLng().lat; });
   avgLat /= _moveSelected.size;
-  // 対象のみ選択時は0.2m、筒場が含まれる場合は1m
-  const allTargets = [..._moveSelected].every(k=>k.startsWith('tg:'));
-  const stepM = allTargets ? 0.2 : 1;
+  // 微調整量: 筒場(tube:)を含む選択は 1m、含まない選択（対象 tg: / 撮影地点 view: のみ）は 0.2m。
+  //   撮影地点も被写体（対象）と同じ 0.2m にする。筒場の 1m は従来どおり。
+  const hasTube = [..._moveSelected].some(k=>k.startsWith('tube:'));
+  const stepM = hasTube ? 1 : 0.2;
   const dlat = stepM/111111;
   const dlng = stepM/(111111*Math.cos(avgLat*Math.PI/180));
   _moveSelected.forEach(k=>{
@@ -3060,8 +3061,8 @@ function mobMoveStep(dir){
   let avgLat = 0;
   _moveSelected.forEach(k=>{ const m=_moveMarkers[k]; if(m) avgLat+=m.getLatLng().lat; });
   avgLat /= _moveSelected.size;
-  const allTargets = [..._moveSelected].every(k=>k.startsWith('tg:'));
-  const stepM = allTargets ? 0.2 : 1;
+  const hasTube = [..._moveSelected].some(k=>k.startsWith('tube:'));
+  const stepM = hasTube ? 1 : 0.2;
   const dlat = stepM/111111;
   const dlng = stepM/(111111*Math.cos(avgLat*Math.PI/180));
   _moveSelected.forEach(k=>{
