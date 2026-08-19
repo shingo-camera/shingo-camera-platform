@@ -382,6 +382,55 @@ test("[実ファイル] MY PAGE/STORE の「利用する」も別タブ（§19�
   assert.match(store, /target="_blank" rel="noopener noreferrer">利用する/);
 });
 
+/* MY PAGE 購入済みカード: appUrl なしの追加機能（HANABI_GOOGLE_EARTH 等）を「準備中」にしない */
+test("[実ファイル] ownedCard: 購入済み+appUrlあり→「利用する」／appUrlなし→「購入済み」バッジ（準備中でない・起動リンクなし）", () => {
+  const owned = siteJsN.match(/function ownedCard[\s\S]*?\n  \}/)[0];
+  // 1. 購入済み + appUrl あり → 「利用する」（別タブ）
+  assert.match(owned, /launchUrl\s*\?[\s\S]*target="_blank" rel="noopener noreferrer">利用する/, "appUrlあり→利用する");
+  // 2. 購入済み + appUrl なし → HOME/STORE と同一の所有バッジ（badge-owned「購入済み」）
+  assert.match(owned, /badge badge-owned">購入済み/, "appUrlなし→購入済みバッジ");
+  // 3. 購入済み + appUrl なし → 「準備中」を出さない（未提供商品向け表現を使わない）
+  assert.doesNotMatch(owned, /btn disabled">準備中/, "owned に準備中を出さない");
+  // 3b. appUrl なし側で単体起動リンク（<a href … 利用する）を生成しない
+  //     （利用する<a> は launchUrl あり側の三項分岐のみに存在する）
+  const elseBranch = owned.split(":")[owned.split(":").length - 1];
+  assert.doesNotMatch(elseBranch, /<a[^>]*href/, "appUrlなし側に起動<a href>を作らない");
+  // 5. HOME/STORE 既存挙動不変: productLinksHtml の granted+appUrlなし も同じ badge-owned
+  const links = siteJsN.match(/function productLinksHtml[\s\S]*?\n  \}/)[0];
+  assert.match(links, /badge badge-owned">購入済み/, "HOME/STORE の所有バッジは不変");
+});
+
+test("[実ファイル] HANABI_GOOGLE_EARTH.appUrl は null のまま（単体起動アプリ化しない）", () => {
+  const cfg = readFileSync("public/assets/site-config.js", "utf8");
+  const ge = cfg.match(/HANABI_GOOGLE_EARTH:\s*\{[\s\S]*?\n    \}/)[0];
+  assert.match(ge, /appUrl:\s*null/, "HANABI_GOOGLE_EARTH.appUrl は null");
+  assert.doesNotMatch(ge, /appUrl:\s*["\x27]\/apps\//, "起動URLを設定しない");
+});
+
+/* HOME 商品カード: 発売済み商品の H3 に静的「準備中」バッジを残さない（動的 CTA が状態を出す） */
+test("[実ファイル] HOME の HANABI PLANNER カードに静的「準備中」バッジが無い（利用する と同時表示されない）", () => {
+  // HANABI カード（data-product-links="HANABI" を持つ product-card）を抽出。
+  const cards = indexHtmlN.split(/<div class="product-card/);
+  const hanabiCard = cards.find((c) => /data-product-links="HANABI"/.test(c) && !/data-product-links="HANABI_GOOGLE_EARTH"/.test(c.split("data-product-links=")[1] || ""));
+  assert.ok(hanabiCard, "HANABI カードが存在");
+  // H3 タイトルに静的 <span class="badge">準備中</span> を含まない（発売済み・appUrl あり）。
+  const h3 = hanabiCard.match(/<h3>[\s\S]*?<\/h3>/)[0];
+  assert.doesNotMatch(h3, /badge">準備中/, "HANABI H3 に静的準備中バッジを残さない");
+  // 状態は動的 CTA（data-product-links）が担う。
+  assert.match(hanabiCard, /data-product-links="HANABI"/, "CTA は動的");
+});
+
+test("[実ファイル] HOME 各 PLANNER カードの状態表示は動的 CTA に統一（SAM/HANABI/EARTH とも静的準備中なし）", () => {
+  // 発売済み 3 商品の H3 いずれにも静的「準備中」バッジが無い。
+  for (const code of ["SUN_AND_MOON", "HANABI", "HANABI_GOOGLE_EARTH"]) {
+    const idx = indexHtmlN.indexOf('data-product-links="' + code + '"');
+    assert.ok(idx > 0, code + " のカードが存在");
+    // 当該カードの直前 800 文字（H3 を含む範囲）に badge">準備中 が無い。
+    const near = indexHtmlN.slice(Math.max(0, idx - 800), idx);
+    assert.doesNotMatch(near, /badge">準備中/, code + " カードに静的準備中バッジが無い");
+  }
+});
+
 /* §11: MY PAGE 未購入は STORE へ */
 test("[実ファイル] MY PAGE の未購入カードは STORE へ誘導する", () => {
   const avail = siteJsN.match(/function availableCard[\s\S]*?\n  \}/)[0];

@@ -89,8 +89,10 @@ test("[scene-mgr] fail-closed: solve 失敗で cache を消し error 状態（fa
   d.reject(new Error("API_500"));
   await tick();
   assert.equal(mgr.getState(), "error", "失敗で error 状態");
-  assert.equal(mgr.resultFor("k2"), null, "失敗結果は cache に入らない");
-  assert.equal(mgr.resultFor("k1"), null, "cache はクリアされる（古い結果へ fallback しない）");
+  assert.equal(mgr.resultFor("k2"), null, "失敗した現在 key の結果は無い（fail-closed・現在状態へ古い scene を出さない）");
+  // 注: 短期 LRU は「別 key」の成功済み authoritative 結果を保持してよい（A→B→A 再利用）。
+  //   これは fallback ではなく、その key の正しい結果。fail-closed が守るのは「現在 key に誤った scene を出さない」こと。
+  //   現在 key は k2（error）なので renderSim は error 表示になり、k1 の結果が現在描画に混ざることはない。
 });
 
 test("[scene-mgr] 二重送信防止: 同一 key 計算中は solve を再呼び出ししない", async () => {
@@ -303,4 +305,50 @@ test("[scene-mgr] P0-2: A solve中に B request 受付 → A 応答は cache へ
   assert.equal(mgr.resultFor("keyB")?.val, "B", "B 成功で cache は B");
   assert.equal(mgr.resultFor("keyA"), null, "A は依然 cache に入らない");
   assert.equal(mgr.getState(), "ok");
+});
+
+/* Rev4 追加性能監査 §1: 短期 LRU で A→B→A の A を server 再計算しない */
+test("[scene-mgr][perf] A→B→A で A を再 solve しない（LRU 再利用・計算中を出さない）", async () => {
+  const timers = makeControllableTimers();
+  let solveCount = 0;
+  const results = { keyA: { val: "A" }, keyB: { val: "B" } };
+  let curKey = null, d = null;
+  const mgr = createSceneManager({
+    solve: () => { solveCount++; d = deferred(); const k = curKey; return d.promise.then(() => results[k]); },
+    onState: () => {},
+    debounceMs: 0,
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+  });
+  // A を計算
+  curKey = "keyA"; mgr.request({ tag: "A" }, "keyA"); timers.flush(); await tick(); d.resolve(); await tick();
+  assert.equal(mgr.resultFor("keyA")?.val, "A");
+  assert.equal(solveCount, 1, "A で 1 回 solve");
+  // B を計算
+  curKey = "keyB"; mgr.request({ tag: "B" }, "keyB"); timers.flush(); await tick(); d.resolve(); await tick();
+  assert.equal(mgr.resultFor("keyB")?.val, "B");
+  assert.equal(solveCount, 2, "B で 2 回目 solve");
+  // A へ戻る → LRU 再利用で solve しない・即 ok
+  mgr.request({ tag: "A" }, "keyA");
+  assert.equal(mgr.getState(), "ok", "A 復帰は即 ok（計算中を出さない）");
+  assert.equal(solveCount, 2, "A 復帰で再 solve しない（LRU 再利用）");
+  assert.equal(mgr.resultFor("keyA")?.val, "A", "A の正しい結果を再利用");
+});
+
+test("[scene-mgr][perf] LRU は容量超で古い key を退避する（メモリ過剰防止）", async () => {
+  const timers = makeControllableTimers();
+  let d = null, cur = null;
+  const mgr = createSceneManager({
+    solve: () => { d = deferred(); const k = cur; return d.promise.then(() => ({ val: k })); },
+    onState: () => {},
+    debounceMs: 0, lruMax: 2,
+    setTimeoutFn: timers.setTimeoutFn, clearTimeoutFn: timers.clearTimeoutFn,
+  });
+  for (const k of ["k1", "k2", "k3"]) {
+    cur = k; mgr.request({ t: k }, k); timers.flush(); await tick(); d.resolve(); await tick();
+  }
+  // 容量 2 なので k1 は退避、k2/k3 は残る
+  assert.equal(mgr.resultFor("k1"), null, "最古 k1 は退避");
+  assert.equal(mgr.resultFor("k3")?.val, "k3", "最新 k3 は残る");
+  assert.equal(mgr.resultFor("k2")?.val, "k2", "k2 は残る");
 });
