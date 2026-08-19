@@ -2618,7 +2618,13 @@ function exitMoveMode(commit){
   // 通常の撮影地点マーカーを復帰（enterMoveMode で退避したもの）。全終了経路（更新後の解除・
   //   キャンセル・PC/スマホ終了・別モード遷移）が exitMoveMode を通るためここ1箇所で確実に戻す。
   //   viewMarker は onViewPick 生成の同一オブジェクト（正しい座標を保持）。再生成はしない。
-  if(viewMarker && !map.hasLayer(viewMarker)) viewMarker.addTo(map);
+  if(viewMarker && !map.hasLayer(viewMarker)){
+    viewMarker.addTo(map);
+    // 復帰した viewMarker のラベルが「取得中…」のまま残らないよう確定表示へ更新する
+    //   （移動確定 commit 中に onViewPick が marker 非表示のまま updateViewLabel を実行し、
+    //    #vmarker-label が DOM 外で更新できなかったケースの確定反映）。
+    updateViewLabel();
+  }
   const panel = document.getElementById('move-commit-panel');
   if(panel) panel.style.display = 'none';
   // チェックボックスOFF
@@ -4323,7 +4329,7 @@ function hkInput(type, k){
     if(k==='DEL'){ buf.tripod=buf.tripod.slice(0,-1); }
     else if(k==='OK'){
       const n=parseInt(buf.tripod,10);
-      if(isFinite(n)&&n>=0&&n<=500){ _terrainInvalidate(); tripodH=n; updateTripodDisp(); calcCamParams(); layout(); }
+      if(isFinite(n)&&n>=0&&n<=500){ _terrainInvalidate(); tripodH=n; updateTripodDisp(); calcCamParams(); layout(); updateViewLabel(); }
       closeTripodPad(); return;
     } else {
       if(buf.tripod.length>=3) return;
@@ -4338,7 +4344,7 @@ function hkInput(type, k){
       const n=parseFloat(buf.elev)||0;
       _terrainInvalidate();
       elevOffset=parseFloat((n*_hkElevSign).toFixed(2));
-      updateElevOffsetDisp(); calcCamParams(); layout();
+      updateElevOffsetDisp(); calcCamParams(); layout(); updateViewLabel();
       closeElevPad(); return;
     } else {
       if(buf.elev.length>=5) return;
@@ -4371,6 +4377,7 @@ function shiftTripod(v, reset=false){
   updateTripodDisp();
   calcCamParams();
   layout();
+  updateViewLabel(); // 撮影地点情報を確定表示へ更新（「取得中…」等の古い表示を残さない）
 }
 function updateTripodDisp(){
   const el = document.getElementById('mob-tripod-disp');
@@ -4389,6 +4396,7 @@ function shiftElevOffset(v, reset=false){
   updateElevOffsetDisp();
   calcCamParams();
   layout();
+  updateViewLabel(); // 撮影地点情報を確定表示へ更新（「取得中…」等の古い表示を残さない）
 }
 function updateElevOffsetDisp(){
   const sign = elevOffset>=0 ? '+' : '';
@@ -8660,7 +8668,16 @@ function _applyPlan(pin){
     elevOffset = pin.elevOffset;
     if(typeof updateElevOffsetDisp==='function') updateElevOffsetDisp();
   }
-  if(pin.multiTarget!==undefined && typeof multiTargetState!=='undefined'){ multiTargetState = pin.multiTarget; }
+  // ②: 対象の呼び出しに失敗した場合は内部の選択状態（multiTargetState）も未選択へ戻す。
+  //   表示（sel-target）が '' に落ちている、または multiTarget が参照する対象が現存しないなら null にする。
+  //   正常に複数選択が復元できた場合のみ従来どおり multiTargetState を復元する。
+  if(typeof multiTargetState !== 'undefined'){
+    const _tgVal = (g('sel-target') && g('sel-target').value) || '';
+    const _mt = pin.multiTarget;
+    const _mtValid = (_tgVal === MULTI_TARGET_VALUE) && _mt && _mt.main &&
+      db.targets.some(t=>t.id===_mt.main); // main が現存する対象を指しているか
+    multiTargetState = _mtValid ? _mt : null;
+  }
   // スライダー系（PC/モバイル両方に反映）
   const setSlider=(ids,v)=>{ ids.forEach(id=>{ const e=g(id); if(e && v!==undefined){ e.value=String(v); } }); };
   if(pin.focal    !==undefined) setSlider(['sl-focal','mob-sl-focal'], pin.focal);
